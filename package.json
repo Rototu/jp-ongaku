@@ -1,0 +1,34 @@
+{
+  "name": "jp-ongaku",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "bun run build && bun run server/index.ts",
+    "dev": "concurrently -k -n api,web -c cyan,magenta \"PORT=5272 bun --watch server/index.ts\" \"vite\"",
+    "build": "vite build",
+    "server": "bun run server/index.ts",
+    "dict": "bun run scripts/build-dict.ts",
+    "mnemonics": "bun run scripts/build-mnemonics.ts",
+    "mnemonics:compile": "bun run scripts/build-mnemonics.ts --compile",
+    "test": "bun test",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@hono/node-server": "^1.13.7",
+    "hono": "^4.6.14",
+    "kuromoji": "^0.1.2",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "wanakana": "^5.3.1"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.1.14",
+    "@types/react": "^18.3.17",
+    "@types/react-dom": "^18.3.5",
+    "@vitejs/plugin-react": "^4.3.4",
+    "concurrently": "^9.1.0",
+    "typescript": "^5.7.2",
+    "vite": "^6.0.5"
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "generator": "scripts/build-mnemonics.ts",
+  "model": "deepseek/deepseek-v4-flash",
+  "characters": 10384,
+  "updatedAt": "2026-07-31T20:32:28.679Z",
+  "sources": {
+    "kanji": "KANJIDIC2 via scriptin/jmdict-simplified (CC BY-SA 4.0)",
+    "components": "KRADFILE via scriptin/jmdict-simplified (EDRDG licence)"
+  }
+}
