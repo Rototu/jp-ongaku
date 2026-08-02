@@ -2,6 +2,7 @@ import { api } from '../lib/api';
 import { useAsync } from '../lib/useAsync';
 import { useCommands, useRail } from '../lib/shell';
 import { Furigana } from '../components/Furigana';
+import { RubyText } from '../components/RubyText';
 import { estimateMinutes, knowledgeClass } from '../components/bits';
 import type { ReviewOptions } from './Review';
 import type { SongMapRow, TroubleCluster } from '../../../shared/types';
@@ -262,7 +263,9 @@ function ClusterRow({
       </div>
       <div className="what">
         <div style={{ fontWeight: 700, fontSize: 15 }}>{cluster.label}</div>
-        <div style={{ fontSize: 13, color: 'var(--muted)' }}>{cluster.detail}</div>
+        <div style={{ fontSize: 13, color: 'var(--muted)' }}>
+          <RubyText text={cluster.detail} />
+        </div>
         {cluster.reason && (
           <div style={{ fontSize: 13, color: 'var(--muted)', fontStyle: 'italic' }}>
             “{cluster.reason}”

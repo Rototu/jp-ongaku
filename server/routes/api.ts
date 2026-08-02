@@ -20,6 +20,7 @@ import {
 } from '../llm/analyze';
 import * as jobs from '../llm/jobs';
 import { LlmUnavailable, status as llmStatus } from '../llm/provider';
+import { annotateText } from '../nlp/annotate';
 import { tokenizeLine } from '../nlp/tokenize';
 import { ENROLL_THRESHOLD } from '../nlp/priority';
 import type { AnalyzedToken } from '../nlp/tokenize';
@@ -873,6 +874,26 @@ api.post('/kanji/mnemonics', async (c) => {
     }
     return c.json({ error: err instanceof Error ? err.message : 'failed' }, 502);
   }
+});
+
+/**
+ * Ruby for Japanese quoted inside English prose — explanations, grammar notes,
+ * model answers. The client asks for the strings it is about to show, in one
+ * batch, and caches what comes back; the server caches the annotation itself,
+ * so the same explanation is only ever parsed once.
+ */
+api.post('/furigana', async (c) => {
+  const body = await c.req.json<{ texts?: unknown }>();
+  const texts = Array.isArray(body.texts) ? body.texts.filter((t) => typeof t === 'string') : null;
+  if (!texts) return c.json({ error: 'texts is required' }, 400);
+  if (texts.length > 200) return c.json({ error: 'too many texts in one request' }, 400);
+
+  const segments: Record<string, FuriganaSegment[]> = {};
+  for (const text of texts) {
+    if (text.length > 2000) continue;
+    segments[text] = await annotateText(text);
+  }
+  return c.json({ segments });
 });
 
 api.post('/analyze-line', async (c) => {
