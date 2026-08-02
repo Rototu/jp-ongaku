@@ -54,7 +54,7 @@ function isFiller(t: KuromojiToken): boolean {
   return t.surface_form.trim() === '';
 }
 
-function readingOf(t: KuromojiToken): string {
+export function readingOf(t: KuromojiToken): string {
   // Unknown words (latin, symbols, novel katakana) come back without a reading.
   if (t.reading && t.reading !== '*') return hiragana(t.reading);
   return hiragana(t.surface_form);

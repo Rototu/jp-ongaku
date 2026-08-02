@@ -4,6 +4,7 @@ import { useAsync } from '../lib/useAsync';
 import { useCommands, useRail } from '../lib/shell';
 import type { AnalyzedTokenView } from '../lib/types';
 import { Furigana } from '../components/Furigana';
+import { RubyText } from '../components/RubyText';
 import { WordPanel } from '../components/WordPanel';
 import { YouTubePlayer, type PlayerHandle } from '../components/YouTubePlayer';
 import { ChunkedLine, type ChunkMastery } from '../components/ChunkedLine';
@@ -1010,12 +1011,24 @@ function LyricLine({
         </>
       )}
 
-      {line.analysis?.translation && <div className="translation">{line.analysis.translation}</div>}
-      {line.analysis?.literal && <div className="literal">literally: {line.analysis.literal}</div>}
+      {line.analysis?.translation && (
+        <div className="translation">
+          <RubyText text={line.analysis.translation} />
+        </div>
+      )}
+      {line.analysis?.literal && (
+        <div className="literal">
+          literally: <RubyText text={line.analysis.literal} />
+        </div>
+      )}
       {line.analysis?.notes?.map((note, i) => (
         <div className="note-chip" key={i}>
-          <b>{note.pattern}</b>
-          <span>{note.explanation}</span>
+          <b>
+            <RubyText text={note.pattern} />
+          </b>
+          <span>
+            <RubyText text={note.explanation} />
+          </span>
         </div>
       ))}
     </div>
@@ -1128,7 +1141,9 @@ function WordGarden({ words, onChanged }: { words: SongWord[]; onChanged: () => 
             <div className="mono faint" style={{ fontSize: 11.5 }}>
               {word.romaji}
             </div>
-            <div className="gloss">{word.glosses.slice(0, 2).join(' · ')}</div>
+            <div className="gloss">
+              <RubyText text={word.glosses.slice(0, 2).join(' · ')} />
+            </div>
             {word.enrolled ? (
               <div className="meta">
                 {word.jlpt && <span className="tag jlpt">N{word.jlpt}</span>}

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { api, type WordRefInput } from '../lib/api';
 import type { WordExample, WordQuestion } from '../../../shared/types';
 import { Furigana } from './Furigana';
+import { RubyText } from './RubyText';
 
 /**
  * The on-demand half of a word explanation: generated usage examples, and a
@@ -124,7 +125,11 @@ export function WordExtras({ word }: { word: WordRefInput }) {
               </div>
               <div className="romaji">{ex.romaji}</div>
               <div className="en">{ex.english}</div>
-              {ex.note && <div className="faint note">{ex.note}</div>}
+              {ex.note && (
+                <div className="faint note">
+                  <RubyText text={ex.note} />
+                </div>
+              )}
             </div>
           ))}
           <div className="faint" style={{ fontSize: '0.74rem' }}>
@@ -166,8 +171,12 @@ export function WordExtras({ word }: { word: WordRefInput }) {
         <div className="qa-list">
           {questions.map((qa) => (
             <div className="qa" key={qa.question}>
-              <div className="q">{qa.question}</div>
-              <div className="a">{qa.answer}</div>
+              <div className="q">
+                <RubyText text={qa.question} />
+              </div>
+              <div className="a">
+                <RubyText text={qa.answer} />
+              </div>
             </div>
           ))}
         </div>

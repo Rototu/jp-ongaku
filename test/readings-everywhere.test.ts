@@ -5,12 +5,14 @@ import { buildLesson } from '../server/lesson/build';
 import * as srs from '../server/srs/store';
 import { parsePlain } from '../server/lyrics/lrc';
 import { segmentsToReading } from '../server/nlp/furigana';
+import { annotateText } from '../server/nlp/annotate';
 
 /**
  * Kanji are decorative for this user: shown, never required. Any surface that
  * displays Japanese must therefore carry a reading — ruby, romaji, or both.
  * These tests cover the surfaces that are easy to forget: multiple-choice
- * options, the trouble-line list, and the mistakes report.
+ * options, the trouble-line list, the mistakes report, and the Japanese quoted
+ * inside English explanations.
  *
  * Fixture lines are written by hand for these tests.
  */
@@ -119,6 +121,38 @@ describe('trouble lines', () => {
       expect(line.romaji.length).toBeGreaterThan(0);
       expect(hasKanji(line.romaji)).toBe(false);
     }
+  });
+});
+
+describe('prose annotation', () => {
+  test('kanji quoted inside an English sentence gets ruby', async () => {
+    const text = 'The 已然形 (realis form) of 見回す, used with the classical particle ど.';
+    const segments = await annotateText(text);
+
+    // Nothing is lost or reordered: the segments are the sentence.
+    expect(segments.map((s) => s.text).join('')).toBe(text);
+
+    const annotated = segments.filter((s) => s.ruby);
+    expect(annotated.length).toBeGreaterThan(0);
+    // Every kanji in the sentence sits under a reading.
+    for (const seg of segments) {
+      if (hasKanji(seg.text)) expect(seg.ruby.length).toBeGreaterThan(0);
+    }
+    // And no reading is itself kanji.
+    for (const seg of annotated) expect(hasKanji(seg.ruby)).toBe(false);
+  });
+
+  test('text without kanji comes back as one plain segment', async () => {
+    expect(await annotateText('look around')).toEqual([{ text: 'look around', ruby: '' }]);
+    expect(await annotateText('Contraction of 〜ている.')).toEqual([
+      { text: 'Contraction of 〜ている.', ruby: '' },
+    ]);
+    expect(await annotateText('')).toEqual([]);
+  });
+
+  test('compounds keep the reading of the whole word', async () => {
+    const segments = await annotateText('大人 means adult.');
+    expect(segments[0]).toEqual({ text: '大人', ruby: 'おとな' });
   });
 });
 

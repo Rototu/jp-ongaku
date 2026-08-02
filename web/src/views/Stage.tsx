@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { api, type ApiError, type KanjiInfo } from '../lib/api';
 import { Furigana } from '../components/Furigana';
+import { RubyText } from '../components/RubyText';
 import { clock } from '../components/bits';
 import type { PlayerHandle } from '../components/YouTubePlayer';
 import type { AiChunk, SongLine } from '../../../shared/types';
@@ -414,11 +415,21 @@ export function Stage({
                   <span className="mono" style={{ fontSize: 11.5, color: 'var(--sage-dim)' }}>
                     {hoveredChunk.romaji}
                   </span>
-                  {hoveredChunk.role && <span className="tag">{hoveredChunk.role}</span>}
+                  {hoveredChunk.role && (
+                    <span className="tag">
+                      <RubyText text={hoveredChunk.role} />
+                    </span>
+                  )}
                 </div>
-                {hoveredChunk.meaning && <div className="gloss">{hoveredChunk.meaning}</div>}
+                {hoveredChunk.meaning && (
+                  <div className="gloss">
+                    <RubyText text={hoveredChunk.meaning} />
+                  </div>
+                )}
                 {hoveredChunk.explanation && (
-                  <div className="expl">{hoveredChunk.explanation}</div>
+                  <div className="expl">
+                    <RubyText text={hoveredChunk.explanation} />
+                  </div>
                 )}
               </div>
 
@@ -455,18 +466,16 @@ export function Stage({
                                 <span className="lbl">{info.strokes} strokes</span>
                               ) : null}
                             </div>
+                            {/* Only the meaning hook is shown. The sound hook is
+                                written around a single reading, so beside a
+                                character with several it reads as a rule when it
+                                is an example — and it costs more room than the
+                                readings themselves. */}
                             {info.mnemonic && (
                               <div className="mnemo">
                                 <div>
                                   <span className="lbl">means</span>
-                                  {info.mnemonic.meaning}
-                                </div>
-                                <div>
-                                  <span className="lbl">
-                                    sounds
-                                    {info.mnemonic.readingKey ? ` · ${info.mnemonic.readingKey}` : ''}
-                                  </span>
-                                  {info.mnemonic.reading}
+                                  <RubyText text={info.mnemonic.meaning} />
                                 </div>
                               </div>
                             )}
@@ -515,7 +524,9 @@ export function Stage({
             {literal && (
               <div className="col">
                 <span className="cap">literally</span>
-                <div className="lit">{literal}</div>
+                <div className="lit">
+                  <RubyText text={literal} />
+                </div>
               </div>
             )}
             {notes.length > 0 && (
@@ -523,7 +534,10 @@ export function Stage({
                 <span className="cap">grammar</span>
                 {notes.map((note, i) => (
                   <div className="note" key={note.key || i}>
-                    <b>{note.pattern}</b> {note.explanation}
+                    <b>
+                      <RubyText text={note.pattern} />
+                    </b>{' '}
+                    <RubyText text={note.explanation} />
                   </div>
                 ))}
               </div>

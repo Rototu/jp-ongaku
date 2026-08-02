@@ -939,6 +939,26 @@ rt {
   color: var(--leaf-dark);
 }
 
+/*
+ * Japanese quoted inside an English sentence: an explanation, a grammar note,
+ * an answer. The ruby is a little larger than on the lyrics — prose runs at a
+ * smaller size, and 0.46em of it stops being legible — and the line needs room
+ * above it so readings do not collide with the line before.
+ */
+.ruby-text ruby {
+  font-family: var(--jp);
+}
+
+.ruby-text rt {
+  font-size: 0.58em;
+  color: inherit;
+  opacity: 0.75;
+}
+
+.ruby-text:has(rt) {
+  line-height: 2;
+}
+
 .jp-line {
   font-family: var(--jp);
   line-height: 2.1;

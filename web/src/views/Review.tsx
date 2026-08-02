@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api, type GradePreview } from '../lib/api';
 import { Furigana } from '../components/Furigana';
+import { RubyText } from '../components/RubyText';
 import { YouTubePlayer, type PlayerHandle } from '../components/YouTubePlayer';
 import { Ring, interval, masteryOf } from '../components/bits';
 import type { Card, CardKind, CardReasonKind, ClozeChoice } from '../../../shared/types';
@@ -349,14 +350,24 @@ export function Review({
                     </div>
                   )}
                   {card.back.glosses && card.back.glosses.length > 1 && (
-                    <div className="glosses">{card.back.glosses.join(' · ')}</div>
+                    <div className="glosses">
+                      <RubyText text={card.back.glosses.join(' · ')} />
+                    </div>
                   )}
-                  {card.back.note && <div className="note">{card.back.note}</div>}
+                  {card.back.note && (
+                    <div className="note">
+                      <RubyText text={card.back.note} />
+                    </div>
+                  )}
                   {card.back.lineTranslation && (
-                    <div className="note">{card.back.lineTranslation}</div>
+                    <div className="note">
+                      <RubyText text={card.back.lineTranslation} />
+                    </div>
                   )}
                   {(mnemonic ?? card.back.mnemonic) && (
-                    <div className="mnemonic">💡 {mnemonic ?? card.back.mnemonic}</div>
+                    <div className="mnemonic">
+                      💡 <RubyText text={mnemonic ?? card.back.mnemonic} />
+                    </div>
                   )}
                 </div>
                 <div className="mastery-col">

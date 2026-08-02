@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import type { AnalyzedTokenView } from '../lib/types';
 import { api, type KanjiInfo } from '../lib/api';
 import { Furigana } from './Furigana';
+import { RubyText } from './RubyText';
 import { WordExtras } from './WordExtras';
 
 /**
@@ -84,19 +85,24 @@ export function WordPanel({
         {token.entry?.common && <span className="tag">common</span>}
         {token.pos && <span className="tag">{token.pos}</span>}
         {token.baseForm !== token.surface && (
-          <span className="tag">dict. form {token.baseForm}</span>
+          <span className="tag">
+            dict. form <RubyText text={token.baseForm} />
+          </span>
         )}
       </div>
 
       {token.conjugation && (
         <p className="muted" style={{ fontSize: '0.88rem', marginTop: 0 }}>
-          Built from <b className="mono">{token.parts.join(' + ')}</b>
+          Built from{' '}
+          <b className="mono">
+            <RubyText text={token.parts.join(' + ')} />
+          </b>
         </p>
       )}
 
       {token.functionGloss && (
         <div className="notice" style={{ marginBottom: '0.8rem' }}>
-          {token.functionGloss}
+          <RubyText text={token.functionGloss} />
         </div>
       )}
 
@@ -106,7 +112,9 @@ export function WordPanel({
           {token.entry.senses.map((sense, i) => (
             <div className="sense" key={i}>
               <div className="pos">{sense.pos.join(', ')}</div>
-              <div>{sense.glosses.join('; ')}</div>
+              <div>
+                <RubyText text={sense.glosses.join('; ')} />
+              </div>
               {sense.misc.length > 0 && <div className="faint mono">{sense.misc.join(', ')}</div>}
             </div>
           ))}
@@ -125,10 +133,10 @@ export function WordPanel({
           {token.grammar.map((g) => (
             <div className="card" key={g.key} style={{ marginBottom: '0.5rem' }}>
               <div className="jp-line" style={{ fontSize: '1.05rem' }}>
-                {g.pattern}
+                <RubyText text={g.pattern} />
               </div>
               <div className="muted" style={{ fontSize: '0.88rem' }}>
-                {g.explanation}
+                <RubyText text={g.explanation} />
               </div>
             </div>
           ))}
@@ -174,17 +182,12 @@ export function WordPanel({
                       </span>
                     )}
                   </div>
+                  {/* Meaning hook only — see the note on the stage's kanji column. */}
                   {k.mnemonic && (
                     <div className="mnemo">
                       <div>
                         <span className="lbl">means</span>
-                        {k.mnemonic.meaning}
-                      </div>
-                      <div>
-                        <span className="lbl">
-                          sounds{k.mnemonic.readingKey ? ` · ${k.mnemonic.readingKey}` : ''}
-                        </span>
-                        {k.mnemonic.reading}
+                        <RubyText text={k.mnemonic.meaning} />
                       </div>
                     </div>
                   )}

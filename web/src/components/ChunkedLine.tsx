@@ -1,6 +1,7 @@
 import type { AiChunk } from '../../../shared/types';
 import { roleColorIdx } from '../../../shared/roles';
 import { Furigana } from './Furigana';
+import { RubyText } from './RubyText';
 import { WordExtras } from './WordExtras';
 
 /**
@@ -115,7 +116,9 @@ function ChunkDetail({
         {chunk.romaji && <span className="romaji">{chunk.romaji}</span>}
         {chunk.role && (
           <span className="role">
-            <em>{chunk.role}</em>
+            <em>
+              <RubyText text={chunk.role} />
+            </em>
           </span>
         )}
         {chunk.readingCheck === 'unverified' && (
@@ -127,8 +130,16 @@ function ChunkDetail({
           </span>
         )}
       </div>
-      {chunk.meaning && <div className="meaning">{chunk.meaning}</div>}
-      {chunk.explanation && <div className="explanation">{chunk.explanation}</div>}
+      {chunk.meaning && (
+        <div className="meaning">
+          <RubyText text={chunk.meaning} />
+        </div>
+      )}
+      {chunk.explanation && (
+        <div className="explanation">
+          <RubyText text={chunk.explanation} />
+        </div>
+      )}
       <WordExtras
         word={{
           term: chunk.text,

@@ -316,6 +316,13 @@ export const api = {
       `/lookup?term=${encodeURIComponent(term)}`,
     ),
 
+  /** Ruby for Japanese quoted inside prose, keyed by the string that was sent. */
+  furigana: (texts: string[]) =>
+    request<{ segments: Record<string, FuriganaSegment[]> }>('/furigana', {
+      method: 'POST',
+      body: JSON.stringify({ texts }),
+    }),
+
   kanjiMnemonics: (chars: string[]) =>
     request<{ mnemonics: Record<string, KanjiMnemonic> }>('/kanji/mnemonics', {
       method: 'POST',
