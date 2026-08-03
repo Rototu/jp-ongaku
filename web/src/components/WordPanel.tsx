@@ -6,19 +6,25 @@ import { RubyText } from './RubyText';
 import { WordExtras } from './WordExtras';
 
 /**
- * Side panel shown when a word in the lyrics is clicked: readings, romaji,
- * every dictionary sense, grammar carried by the chunk, and the kanji inside it
- * broken down character by character — then generated examples and a question
- * box for whatever the dictionary does not answer.
+ * Card shown under the line when a word in the lyrics is clicked: readings,
+ * romaji, every dictionary sense, grammar carried by the chunk, and the kanji
+ * inside it broken down character by character — then generated examples and a
+ * question box for whatever the dictionary does not answer.
+ *
+ * It sits in the flow directly beneath the word, like the AI chunk card, so a
+ * click never moves the lyrics or splits attention across the window.
  */
 export function WordPanel({
   token,
+  colorIdx,
   onClose,
   onEnrolled,
   lineText,
   songId,
 }: {
   token: AnalyzedTokenView;
+  /** Role colour of the word, so the card matches the text it came from. */
+  colorIdx?: number;
   onClose: () => void;
   onEnrolled?: () => void;
   /** The line the word was tapped in, passed to the AI for context. */
@@ -45,13 +51,6 @@ export function WordPanel({
     };
   }, [token.surface]);
 
-  // The panel is a fixed overlay on the right. Flagging it on the document lets
-  // the page underneath reserve that strip instead of being covered by it.
-  useEffect(() => {
-    document.documentElement.classList.add('panel-open');
-    return () => document.documentElement.classList.remove('panel-open');
-  }, []);
-
   const enroll = async () => {
     if (!token.wordId) return;
     setEnrolling(true);
@@ -65,17 +64,15 @@ export function WordPanel({
   };
 
   return (
-    <aside className="panel">
-      <div className="panel-head">
-        <div>
-          <div className="jp-line" style={{ fontSize: '1.9rem' }}>
-            <Furigana segments={token.furigana} />
-          </div>
-          <div className="romaji" style={{ fontSize: '0.95rem' }}>
-            {token.romaji}
-          </div>
-        </div>
-        <button className="ghost small" onClick={onClose} aria-label="Close">
+    <div
+      className={`chunk-detail word-detail${colorIdx !== undefined && colorIdx >= 0 ? ` c${colorIdx}` : ''}`}
+    >
+      <div className="head">
+        <span className="jp-line" style={{ fontSize: 24, fontWeight: 700 }}>
+          <Furigana segments={token.furigana} />
+        </span>
+        {token.romaji && <span className="romaji">{token.romaji}</span>}
+        <button className="ghost small close" onClick={onClose} aria-label="Close">
           ✕
         </button>
       </div>
@@ -217,6 +214,6 @@ export function WordPanel({
           Already in your review deck.
         </p>
       )}
-    </aside>
+    </div>
   );
 }

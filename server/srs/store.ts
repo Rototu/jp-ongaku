@@ -224,7 +224,10 @@ export function stats(): Stats {
   const mature =
     one<{ n: number }>('SELECT COUNT(*) AS n FROM srs WHERE interval_days >= ?', MATURE_DAYS)?.n ??
     0;
-  const leeches = one<{ n: number }>('SELECT COUNT(*) AS n FROM srs WHERE leech = 1')?.n ?? 0;
+  // Retired leeches are out of the rotation, so counting them would badge a
+  // trouble drill that has nothing to drill — the queue already skips them.
+  const leeches =
+    one<{ n: number }>('SELECT COUNT(*) AS n FROM srs WHERE leech = 1 AND suspended = 0')?.n ?? 0;
   const songs = one<{ n: number }>('SELECT COUNT(*) AS n FROM songs')?.n ?? 0;
 
   const todayStart = startOfLocalDay(new Date()).toISOString();
@@ -246,12 +249,13 @@ export function stats(): Stats {
   );
 
   // "Words you know" counts words, not cards: one word can carry a vocab, a
-  // cloze and a listening card, and the user thinks of that as one word.
+  // cloze and a listening card, and the user thinks of that as one word. A
+  // retired card counts too — retiring it was the user saying they know it.
   const wordsKnown =
     one<{ n: number }>(
       `SELECT COUNT(DISTINCT c.word_id) AS n
        FROM cards c JOIN srs r ON r.card_id = c.id
-       WHERE c.word_id IS NOT NULL AND r.reps > 0`,
+       WHERE c.word_id IS NOT NULL AND (r.reps > 0 OR r.suspended = 1)`,
     )?.n ?? 0;
 
   return {
@@ -437,7 +441,9 @@ export interface TroubleLine {
 
 /**
  * Lines the user keeps failing, ranked worst first — the "replay just these"
- * list. A line's pain is the total lapses across every card anchored to it.
+ * list. A line's pain is the total lapses across every card anchored to it, and
+ * retired cards are left out: a card taken out of the rotation cannot be failed
+ * again, so counting its history would keep flagging a line forever.
  */
 export function troubleLines(songId?: number, limit = 20): TroubleLine[] {
   const db = getDb();
@@ -467,7 +473,7 @@ export function troubleLines(songId?: number, limit = 20): TroubleLine[] {
        JOIN srs r ON r.card_id = c.id
        JOIN lines l ON l.id = c.line_id
        JOIN songs s ON s.id = l.song_id
-       WHERE r.lapses > 0 ${filter}
+       WHERE r.lapses > 0 AND r.suspended = 0 ${filter}
        GROUP BY l.id
        ORDER BY lapses DESC, l.song_id, l.idx
        LIMIT ?`,
@@ -727,13 +733,20 @@ export function enrollWord(wordId: number): Card | null {
  * keeps coming back — so mastery is the interval measured against the point a
  * card counts as mature, with a ceiling for anything still lapsing so a leech
  * can never read as solid.
+ *
+ * Retiring a card ("Retire this card" in the review runner, `suspended` here) is
+ * the user saying they know it and want it out of the rotation, so it reads as
+ * fully known however short its interval got — including a retired leech, where
+ * the decision to stop drilling outranks the lapse history.
  */
 export function mastery(srs: {
   intervalDays: number;
   reps: number;
   lapses: number;
   leech: boolean;
+  suspended?: boolean;
 }): number {
+  if (srs.suspended) return 100;
   if (srs.reps === 0) return 0;
   const raw = Math.min(1, srs.intervalDays / MATURE_DAYS);
   let score = Math.round(raw * 100);
@@ -790,6 +803,7 @@ export function songMap(): SongMapRow[] {
         reps: number | null;
         lapses: number | null;
         leech: number | null;
+        retired: number | null;
         cards: number | null;
       },
       []
@@ -799,6 +813,7 @@ export function songMap(): SongMapRow[] {
               SUM(r.reps)          AS reps,
               SUM(r.lapses)        AS lapses,
               MAX(r.leech)         AS leech,
+              MIN(r.suspended)     AS retired,
               COUNT(r.card_id)     AS cards
        FROM lines l
        LEFT JOIN cards c ON c.line_id = l.id
@@ -811,7 +826,10 @@ export function songMap(): SongMapRow[] {
   const bySong = new Map<number, SongMapRow['cells']>();
   for (const l of lines) {
     const cells = bySong.get(l.song_id) ?? [];
-    const studied = (l.cards ?? 0) > 0 && (l.reps ?? 0) > 0;
+    const retired = l.retired === 1;
+    // A line whose cards were all retired counts as studied even at zero reps:
+    // retiring is an answer about it, so it should not read as untouched.
+    const studied = (l.cards ?? 0) > 0 && ((l.reps ?? 0) > 0 || retired);
     cells.push({
       lineId: l.id,
       mastery: studied
@@ -820,9 +838,10 @@ export function songMap(): SongMapRow[] {
             reps: l.reps ?? 0,
             lapses: l.lapses ?? 0,
             leech: l.leech === 1,
+            suspended: retired,
           })
         : -1,
-      trouble: (l.lapses ?? 0) >= LEECH_THRESHOLD,
+      trouble: !retired && (l.lapses ?? 0) >= LEECH_THRESHOLD,
       timeMs: l.time_ms,
     });
     bySong.set(l.song_id, cells);

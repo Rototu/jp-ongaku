@@ -14,6 +14,7 @@ export function Settings() {
   const [gatewayModel, setGatewayModel] = useState('');
   const [effort, setEffort] = useState('none');
   const [concurrency, setConcurrency] = useState('4');
+  const [lyricReadings, setLyricReadings] = useState('ai');
   const [saved, setSaved] = useState<string | null>(null);
 
   useEffect(() => {
@@ -22,6 +23,7 @@ export function Settings() {
       setGatewayModel(settings.data.settings.gateway_model ?? '');
       setEffort(settings.data.settings.reasoning_effort ?? 'none');
       setConcurrency(settings.data.settings.llm_concurrency ?? '4');
+      setLyricReadings(settings.data.settings.lyric_readings ?? 'ai');
     }
   }, [settings.data]);
 
@@ -31,6 +33,7 @@ export function Settings() {
       gateway_model: gatewayModel || null,
       reasoning_effort: effort || null,
       llm_concurrency: concurrency || null,
+      lyric_readings: lyricReadings || null,
     };
     if (gatewayKey.trim()) body.gateway_api_key = gatewayKey.trim();
     const res = await api.saveSettings(body);
@@ -54,9 +57,11 @@ export function Settings() {
       <div className="card stack">
         <h2 style={{ marginTop: 0 }}>Explanation engine</h2>
         <p className="muted" style={{ marginTop: 0 }}>
-          Readings, romaji, furigana and dictionary meanings are always computed locally. An AI
-          backend adds natural translations, grammar notes for each line, and memory hooks for cards
-          you keep failing. Results are cached, so each song costs one batch of calls, once.
+          Segmentation and dictionary meanings are computed locally. An AI backend decides the
+          readings — choosing among every reading the dictionary allows, and following any
+          instruction you leave with the song — and adds natural translations, grammar notes for each
+          line, and memory hooks for cards you keep failing. Results are cached, so each song costs
+          one batch of calls, once.
         </p>
 
         {settings.data && (
@@ -137,6 +142,23 @@ export function Settings() {
           <div className="faint" style={{ fontSize: '0.76rem', marginTop: '0.3rem' }}>
             Batches of lines are independent, so they are sent at once. A rate limit
             pauses every request in flight, not just the one that hit it.
+          </div>
+        </label>
+
+        <label>
+          <div className="faint" style={{ fontSize: '0.78rem', marginBottom: '0.25rem' }}>
+            Furigana over the lyrics
+          </div>
+          <select value={lyricReadings} onChange={(e) => setLyricReadings(e.target.value)}>
+            <option value="ai">Only readings the AI decided (default)</option>
+            <option value="dictionary">Dictionary readings until the AI has run</option>
+          </select>
+          <div className="faint" style={{ fontSize: '0.76rem', marginTop: '0.3rem' }}>
+            The offline parse commits to one reading per word and cannot know that a
+            singer reads 埋葬る as うめる or that a name breaks every rule. On the
+            default, a line carries no furigana or romaji until the model has read it —
+            no reading beats a confident wrong one. Songs already explained are
+            unaffected either way.
           </div>
         </label>
 

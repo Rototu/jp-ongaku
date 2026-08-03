@@ -51,13 +51,14 @@ export function ChunkedLine({
             );
           }
           const mastery = masteryOf?.(chunk) ?? null;
+          // A fully learnt word needs no class of its own: the bar underneath is
+          // simply full, which is what the legend calls "solid".
           const classes = [
             'chunk',
             `c${roleColorIdx(chunk.role)}`,
             selectedIdx === i ? 'selected' : '',
             chunk.readingCheck === 'unverified' ? 'unverified' : '',
             mastery?.trouble ? 'trouble' : '',
-            mastery && mastery.value >= 100 ? 'solid' : '',
           ]
             .filter(Boolean)
             .join(' ');

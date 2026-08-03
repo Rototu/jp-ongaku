@@ -223,8 +223,11 @@ function materialize(
        glosses  = CASE WHEN length(excluded.glosses) > length(glosses) THEN excluded.glosses ELSE glosses END
      RETURNING id`,
   );
+  // The surface goes in on conflict too: a re-import of an existing lesson is the
+  // path by which older links pick the column up.
   const linkWord = db.prepare(
-    'INSERT OR IGNORE INTO word_songs (word_id, song_id, line_id) VALUES (?, ?, ?)',
+    `INSERT INTO word_songs (word_id, song_id, line_id, seen_as) VALUES (?, ?, ?, ?)
+     ON CONFLICT (word_id, line_id) DO UPDATE SET seen_as = excluded.seen_as`,
   );
   const upsertGrammar = db.prepare(
     `INSERT INTO grammar_items (key, pattern, explanation, jlpt, created_at)
@@ -307,7 +310,7 @@ function materialize(
         now,
       ) as { id: number };
 
-      linkWord.run(row.id, songId, lineId);
+      linkWord.run(row.id, songId, lineId, token.surface);
 
       if (shouldEnroll(token.priority)) {
         enrolledHere.push({ token, wordId: row.id });

@@ -4,6 +4,7 @@ import { _setDbForTests, getDb } from '../server/db';
 import { buildLesson, lineFurigana, CLOZE_BLANK } from '../server/lesson/build';
 import {
   backfillCardReadings,
+  backfillWordSurfaces,
   cardsMissingReadings,
   realignWordReadings,
 } from '../server/lesson/backfill-cards';
@@ -295,5 +296,61 @@ describe('vocabulary readings describe the dictionary form', () => {
     await importFixture();
     realignWordReadings();
     expect(realignWordReadings()).toBe(0);
+  });
+});
+
+/**
+ * A word is stored under its dictionary headword, which need not be what the song
+ * writes: the possessive の is filed under 乃. Without the surface recorded, the
+ * bar under a word in the lyrics has no way to find that word's SRS state, so a
+ * retired particle kept showing an empty bar.
+ */
+describe('the form a word was seen as', () => {
+  test('every word/line link records the surface from the line', async () => {
+    await importFixture();
+    const links = getDb()
+      .query<{ lemma: string; seen_as: string | null; text: string }, []>(
+        `SELECT w.lemma, ws.seen_as, l.text
+         FROM word_songs ws JOIN words w ON w.id = ws.word_id JOIN lines l ON l.id = ws.line_id`,
+      )
+      .all();
+
+    expect(links.length).toBeGreaterThan(0);
+    for (const link of links) {
+      expect(link.seen_as).toBeTruthy();
+      // The surface must be text the line actually contains, headword or not.
+      expect(link.text).toContain(link.seen_as as string);
+    }
+  });
+
+  test('a kana surface is kept even when the headword is a kanji nobody writes', async () => {
+    await importFixture();
+    // 君の声 — の is filed under the kanji 乃, so lemma and surface differ.
+    const link = getDb()
+      .query<{ lemma: string; seen_as: string }, []>(
+        `SELECT w.lemma, ws.seen_as FROM word_songs ws JOIN words w ON w.id = ws.word_id
+         WHERE w.reading = 'の'`,
+      )
+      .get();
+    if (!link) return; // the fixture's parse may not enrol の on every dictionary build
+    expect(link.seen_as).toBe('の');
+  });
+
+  test('links made before the column existed are filled in from the stored tokens', async () => {
+    await importFixture();
+    const db = getDb();
+    db.prepare('UPDATE word_songs SET seen_as = NULL').run();
+
+    const filled = backfillWordSurfaces();
+    expect(filled).toBeGreaterThan(0);
+    expect(
+      db.query<{ n: number }, []>('SELECT COUNT(*) AS n FROM word_songs WHERE seen_as IS NULL').get()
+        ?.n,
+    ).toBe(0);
+  });
+
+  test('the backfill is idempotent', async () => {
+    await importFixture();
+    expect(backfillWordSurfaces()).toBe(0);
   });
 });

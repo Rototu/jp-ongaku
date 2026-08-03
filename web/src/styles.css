@@ -46,6 +46,11 @@
   --sage-deep: #4f7a5e;
   --on-forest: #e8f3e6;
 
+  /* the bar under a word: how well it is known. One pair for the legend and the
+     lyrics both, so the key cannot drift from the thing it explains. */
+  --mastery-track: rgba(11, 23, 16, 0.14);
+  --mastery-fill: #4a5c50;
+
   --radius: 16px;
   --radius-lg: 20px;
   --radius-sm: 12px;
@@ -1584,12 +1589,28 @@ rt {
   border-bottom: none;
 }
 
-.hit.best {
-  background: var(--lime-pale);
+/*
+ * The top result is only ranked first, not chosen. A filled row here read as a
+ * selection — as though the rest were disabled and the video and notes belonged to
+ * this one — so the rank is a marker on the edge and the row keeps the same
+ * surface as its neighbours.
+ */
+.hit.first {
+  box-shadow: inset 3px 0 0 var(--lime);
 }
 
+/* Not-Japanese results are worth showing but not worth reading first; faded, not
+   so far that their text stops being legible. */
 .hit.dim {
-  opacity: 0.6;
+  opacity: 0.75;
+}
+
+.hit-header {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 6px;
 }
 
 .hit .art {
@@ -1859,19 +1880,20 @@ rt {
   gap: 6px;
 }
 
+/* Same colours and same 4px bar as the lyrics, only shorter. */
 .legend .swatch .b {
   width: 30px;
-  height: 3.5px;
+  height: 4px;
   border-radius: 999px;
-  background: rgba(11, 23, 16, 0.14);
+  background: var(--mastery-track);
   display: block;
 }
 
 .legend .swatch .b > span {
   display: block;
-  height: 3.5px;
+  height: 4px;
   border-radius: 999px;
-  background: var(--muted);
+  background: var(--mastery-fill);
 }
 
 .verse-head {
@@ -1993,6 +2015,16 @@ rt {
   border-radius: 9px 9px 4px 4px;
 }
 
+/*
+ * How well the word is known. Deliberately NOT in the word's own colour: that
+ * channel already says what the word does, and reusing it made every bar read as
+ * the same wash. The track, the fill and the trouble red are the same values the
+ * legend above the lyrics draws, so the legend is literally what you see.
+ *
+ * Opacity lives in the colours rather than on the element, because an `opacity`
+ * on the track multiplies into the fill — which is what made a half-learnt word
+ * indistinguishable from an unmet one.
+ */
 .chunk .mastery {
   position: absolute;
   left: 6px;
@@ -2000,24 +2032,19 @@ rt {
   bottom: 3px;
   height: 4px;
   border-radius: 999px;
-  background: currentColor;
-  opacity: 0.22;
+  background: var(--mastery-track);
 }
 
 .chunk .mastery > span {
   display: block;
   height: 4px;
   border-radius: 999px;
-  background: currentColor;
-}
-
-.chunk.solid .mastery {
-  opacity: 1;
+  background: var(--mastery-fill);
 }
 
 .chunk.trouble .mastery {
-  color: var(--coral);
-  opacity: 0.28;
+  --mastery-track: var(--coral);
+  --mastery-fill: var(--coral);
 }
 
 .chunk.selected {
@@ -3634,30 +3661,29 @@ rt {
   }
 }
 
-/* ── word panel & extras ─────────────────────────────────────────────────── */
+/* ── word card & extras ──────────────────────────────────────────────────── */
 
-.panel {
-  position: fixed;
-  right: 0;
-  top: 0;
-  bottom: 0;
-  width: min(460px, 100%);
-  background: var(--paper);
-  border-left: 2px solid var(--ink);
-  box-shadow: -10px 0 0 rgba(11, 23, 16, 0.1);
-  padding: 22px;
-  overflow-y: auto;
-  z-index: 50;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
+/* The dictionary card under a word in an unsegmented line. Same shell as the AI
+   chunk card, only with more inside it, so a click always answers in place. */
+.word-detail h2 {
+  font-size: 15px;
+  letter-spacing: 0;
+  text-transform: uppercase;
+  font-family: var(--mono);
+  color: var(--faint);
+  margin-top: 14px;
 }
 
-.panel-head {
-  display: flex;
-  align-items: baseline;
-  gap: 10px;
-  flex-wrap: wrap;
+.word-detail .head .close {
+  margin-left: auto;
+}
+
+.word-detail .sense {
+  margin-top: 6px;
+}
+
+.word-detail > .row {
+  margin-top: 8px;
 }
 
 .sense {

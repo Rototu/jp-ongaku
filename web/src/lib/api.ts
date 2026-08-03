@@ -65,6 +65,15 @@ export interface SearchHit {
   duration: number | null;
   hasSynced: boolean;
   japanese: boolean;
+  lineCount: number;
+  /** Where the last timestamp falls — how much of the song the lyrics cover. */
+  lyricSpanSec: number | null;
+  /** Where the first line lands: the tell between a single and an intro-less edit. */
+  lyricStartSec: number | null;
+  /** The entry's stated length disagrees with its own timings; trust the timings. */
+  durationMismatch: boolean;
+  /** Other entries with byte-identical lyrics, folded into this one. */
+  duplicates: number;
   titleFurigana: { text: string; ruby: string }[] | null;
   titleRomaji: string | null;
   artistFurigana: { text: string; ruby: string }[] | null;
@@ -102,6 +111,8 @@ export interface ImportResult {
   cardsCreated: number;
   /** Present when analysis started automatically on import. */
   analysis: AnalysisJob | null;
+  /** Set when the import had to correct the source metadata, e.g. a wrong length. */
+  notice?: string | null;
 }
 
 export interface SongWord {
@@ -116,9 +127,17 @@ export interface SongWord {
   loanword: boolean;
   enrolled: boolean;
   lapses: number;
+  /** Every card for this word has been retired, so it reads as fully known. */
+  retired: boolean;
+  /**
+   * The forms this word actually wore in the song. The stored lemma is the
+   * dictionary headword, which for kana particles is a kanji the lyrics never
+   * show — の is filed under 乃 — so matching a word on the page needs these.
+   */
+  seenAs: string[];
   /** 0..100 — how well the word is stuck. 0 for anything never answered. */
   mastery: number;
-  /** When the word's soonest card comes back. Null when it isn't in the deck. */
+  /** When the word's soonest unretired card comes back. Null when none is due. */
   dueAt: string | null;
 }
 
@@ -200,6 +219,8 @@ export const api = {
     body: {
       youtubeId?: string | null;
       timings?: { idx: number; timeMs: number }[];
+      /** Moves every timed line by this many ms, for lyrics timed to another cut. */
+      shiftMs?: number;
       titleReading?: string;
       artistReading?: string;
       context?: string | null;
@@ -317,10 +338,11 @@ export const api = {
     ),
 
   /** Ruby for Japanese quoted inside prose, keyed by the string that was sent. */
-  furigana: (texts: string[]) =>
+  /** `songId` scopes the readings to that song's own, over the dictionary's. */
+  furigana: (texts: string[], songId?: number) =>
     request<{ segments: Record<string, FuriganaSegment[]> }>('/furigana', {
       method: 'POST',
-      body: JSON.stringify({ texts }),
+      body: JSON.stringify({ texts, songId }),
     }),
 
   kanjiMnemonics: (chars: string[]) =>

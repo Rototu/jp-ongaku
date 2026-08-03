@@ -15,12 +15,13 @@ import {
   generateKanjiMnemonics,
   generateMnemonic,
   questionHistory,
+  songReadings,
   type KanjiFacts,
   type WordRef,
 } from '../llm/analyze';
 import * as jobs from '../llm/jobs';
 import { LlmUnavailable, status as llmStatus } from '../llm/provider';
-import { annotateText } from '../nlp/annotate';
+import { annotateText, KNOWN_SCOPE } from '../nlp/annotate';
 import { tokenizeLine } from '../nlp/tokenize';
 import { ENROLL_THRESHOLD } from '../nlp/priority';
 import type { AnalyzedToken } from '../nlp/tokenize';
@@ -56,6 +57,12 @@ export function parseYoutubeId(input: string | null | undefined): string | null 
     if (m) return m[1];
   }
   return null;
+}
+
+/** m:ss for a millisecond length, for notices about a song's runtime. */
+function clockSec(ms: number): string {
+  const total = Math.round(ms / 1000);
+  return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')}`;
 }
 
 api.get('/health', (c) => {
@@ -151,7 +158,13 @@ api.post('/songs/import', async (c) => {
     });
     // Explain the song right away rather than waiting for the user to ask.
     const job = jobs.maybeAutoAnalyze(result.songId);
-    return c.json({ ...result, analysis: job });
+    // LRCLIB lengths are crowdsourced and sometimes belong to a different cut of
+    // the song. Say so rather than silently shipping a scrub bar that ends early.
+    const notice =
+      fetched.statedDurationMs !== null && fetched.durationMs !== null
+        ? `LRCLIB listed this entry as ${clockSec(fetched.statedDurationMs)}, but its timings run to ${clockSec(fetched.durationMs)} — the full lyrics were imported and the length corrected.`
+        : null;
+    return c.json({ ...result, analysis: job, notice });
   }
 
   const { title, artist, lyrics } = body;
@@ -349,6 +362,7 @@ api.patch('/songs/:id', async (c) => {
   const body = await c.req.json<{
     youtubeId?: string | null;
     timings?: { idx: number; timeMs: number }[];
+    shiftMs?: number;
     titleReading?: string;
     artistReading?: string;
     context?: string | null;
@@ -405,6 +419,12 @@ api.patch('/songs/:id', async (c) => {
       return c.json({ error: 'Could not read a YouTube video id from that' }, 400);
     }
     db.prepare('UPDATE songs SET youtube_id = ? WHERE id = ?').run(parsed, id);
+    // Listening cards carry the video id inside their audio clip, so a changed
+    // video has to repoint them — otherwise every clip keeps playing the old
+    // upload. The upsert keeps card ids, and with them the review history. A
+    // cleared video leaves nothing to play, so those cards go instead.
+    if (parsed) rebuildListeningCards(id);
+    else removeListeningCards(id);
   }
 
   if (body.timings?.length) {
@@ -417,15 +437,41 @@ api.patch('/songs/:id', async (c) => {
     rebuildListeningCards(id);
   }
 
+  // Lyrics timed against a different cut of the song are right about the spacing
+  // and wrong about the start — an edit that drops a 20-second intro puts every
+  // line 20 seconds early. One offset fixes the whole song, which beats tapping
+  // forty lines again to correct a constant.
+  if (body.shiftMs) {
+    const shift = Math.round(body.shiftMs);
+    db.prepare(
+      `UPDATE lines SET time_ms = MAX(0, time_ms + ?) WHERE song_id = ? AND time_ms IS NOT NULL`,
+    ).run(shift, id);
+    // A later start can push the last line past the stored length, which would
+    // crop the scrub bar; the video is the authority on how long the track is.
+    const last = db
+      .query<{ t: number | null }, [number]>(
+        'SELECT MAX(time_ms) AS t FROM lines WHERE song_id = ?',
+      )
+      .get(id);
+    if (last?.t != null) {
+      db.prepare(
+        'UPDATE songs SET duration_ms = MAX(COALESCE(duration_ms, 0), ?) WHERE id = ?',
+      ).run(last.t + 8000, id);
+    }
+    // Every clip's start and end moved with the lines.
+    rebuildListeningCards(id);
+  }
+
   return c.json({ ok: true });
 });
 
 /**
- * Creates listening cards once a song has both timings and a video.
- * Called after timing or video changes rather than at import, because either
- * can arrive later.
+ * Creates or repoints listening cards once a song has both timings and a video.
+ * Called after timing *and* video changes rather than at import, because either
+ * can arrive later — and because a card built against the previous video would
+ * otherwise keep playing a clip from it.
  */
-function rebuildListeningCards(songId: number) {
+export function rebuildListeningCards(songId: number) {
   const db = getDb();
   const song = db
     .query<{ youtube_id: string | null }, [number]>('SELECT youtube_id FROM songs WHERE id = ?')
@@ -468,6 +514,25 @@ function rebuildListeningCards(songId: number) {
   })();
 }
 
+/**
+ * Drops a song's listening cards, for when its video is taken away. Their whole
+ * prompt is a clip of that video, so without it there is nothing to answer; the
+ * srs rows and review history go with them by foreign key.
+ */
+export function removeListeningCards(songId: number): number {
+  const db = getDb();
+  // Counted before the delete: `changes` also takes in the srs and review rows
+  // that cascade, so it would report a multiple of the cards actually removed.
+  const doomed =
+    db
+      .query<{ n: number }, [number]>(
+        "SELECT COUNT(*) AS n FROM cards WHERE song_id = ? AND kind = 'listening'",
+      )
+      .get(songId)?.n ?? 0;
+  db.prepare("DELETE FROM cards WHERE song_id = ? AND kind = 'listening'").run(songId);
+  return doomed;
+}
+
 api.get('/songs/:id/words', (c) => {
   const id = Number(c.req.param('id'));
   const rows = getDb()
@@ -487,10 +552,14 @@ api.get('/songs/:id/words', (c) => {
         interval_days: number | null;
         reps: number | null;
         leech: number | null;
+        retired: number | null;
         due_at: string | null;
+        seen_as: string | null;
       },
-      [number]
+      [number, number]
     >(
+      // MIN over suspended, so a word only counts as retired once every card for
+      // it is out of the rotation — one retired reading does not retire the word.
       `SELECT DISTINCT w.id, w.lemma, w.reading, w.romaji, w.furigana, w.glosses, w.jlpt,
               w.priority, w.loanword,
               (SELECT COUNT(*) FROM cards c WHERE c.word_id = w.id) AS enrolled,
@@ -498,13 +567,19 @@ api.get('/songs/:id/words', (c) => {
               (SELECT MAX(r.interval_days) FROM cards c JOIN srs r ON r.card_id = c.id WHERE c.word_id = w.id) AS interval_days,
               (SELECT SUM(r.reps) FROM cards c JOIN srs r ON r.card_id = c.id WHERE c.word_id = w.id) AS reps,
               (SELECT MAX(r.leech) FROM cards c JOIN srs r ON r.card_id = c.id WHERE c.word_id = w.id) AS leech,
-              (SELECT MIN(r.due_at) FROM cards c JOIN srs r ON r.card_id = c.id WHERE c.word_id = w.id) AS due_at
+              (SELECT MIN(r.suspended) FROM cards c JOIN srs r ON r.card_id = c.id WHERE c.word_id = w.id) AS retired,
+              (SELECT MIN(r.due_at) FROM cards c JOIN srs r ON r.card_id = c.id
+                 WHERE c.word_id = w.id AND r.suspended = 0) AS due_at,
+              -- Every form the word wore in this song. One word can appear as
+              -- several (探した, 探して), and none of them need equal the headword.
+              (SELECT GROUP_CONCAT(DISTINCT ws2.seen_as) FROM word_songs ws2
+                 WHERE ws2.word_id = w.id AND ws2.song_id = ?) AS seen_as
        FROM words w
        JOIN word_songs ws ON ws.word_id = w.id
        WHERE ws.song_id = ?
        ORDER BY w.priority DESC, w.lemma`,
     )
-    .all(id);
+    .all(id, id);
 
   return c.json({
     words: rows.map((r) => ({
@@ -519,6 +594,8 @@ api.get('/songs/:id/words', (c) => {
       loanword: r.loanword === 1,
       enrolled: r.enrolled > 0,
       lapses: r.lapses ?? 0,
+      retired: r.retired === 1,
+      seenAs: r.seen_as ? r.seen_as.split(',').filter(Boolean) : [],
       // The word garden shows a mastery ring rather than a table column, so the
       // word list carries the same SRS numbers a card does.
       mastery: srs.mastery({
@@ -526,6 +603,7 @@ api.get('/songs/:id/words', (c) => {
         reps: r.reps ?? 0,
         lapses: r.lapses ?? 0,
         leech: r.leech === 1,
+        suspended: r.retired === 1,
       }),
       dueAt: r.due_at,
     })),
@@ -883,15 +961,24 @@ api.post('/kanji/mnemonics', async (c) => {
  * so the same explanation is only ever parsed once.
  */
 api.post('/furigana', async (c) => {
-  const body = await c.req.json<{ texts?: unknown }>();
+  const body = await c.req.json<{ texts?: unknown; songId?: number }>();
   const texts = Array.isArray(body.texts) ? body.texts.filter((t) => typeof t === 'string') : null;
   if (!texts) return c.json({ error: 'texts is required' }, 400);
   if (texts.length > 200) return c.json({ error: 'too many texts in one request' }, 400);
 
+  // Quoting the song's Japanese has to agree with the reading shown in the lyrics
+  // above, so when the caller says which song it is reading, that song's own
+  // readings outrank the dictionary.
+  let known: Map<string, string> | undefined;
+  if (typeof body.songId === 'number' && Number.isFinite(body.songId)) {
+    known = songReadings(body.songId);
+    known.set(KNOWN_SCOPE, String(body.songId));
+  }
+
   const segments: Record<string, FuriganaSegment[]> = {};
   for (const text of texts) {
     if (text.length > 2000) continue;
-    segments[text] = await annotateText(text);
+    segments[text] = await annotateText(text, known);
   }
   return c.json({ segments });
 });
@@ -914,6 +1001,9 @@ const EXPOSED_SETTINGS = [
   'reasoning_effort',
   'llm_concurrency',
   'auto_analyze',
+  // 'ai' (default) shows no reading until the model has decided one; 'dictionary'
+  // shows the offline guess in the meantime.
+  'lyric_readings',
 ] as const;
 
 api.get('/settings', (c) => {

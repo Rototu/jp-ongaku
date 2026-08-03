@@ -29,7 +29,10 @@ export function masteryOf(srs: {
   reps: number;
   lapses: number;
   leech: boolean;
+  suspended?: boolean;
 }): number {
+  // Retired means "I know this, stop asking" — a full bar, not a stalled one.
+  if (srs.suspended) return 100;
   if (srs.reps === 0) return 0;
   const raw = Math.min(1, srs.intervalDays / 21);
   let score = Math.round(raw * 100);

@@ -26,9 +26,12 @@ const SORTS: { key: Sort; label: string }[] = [
 export function Library({
   onOpen,
   onChanged,
+  onNotice,
 }: {
   onOpen: (songId: number) => void;
   onChanged?: () => void;
+  /** Something the import had to correct, carried onto the song page. */
+  onNotice?: (message: string) => void;
 }) {
   const songs = useAsync(() => api.songs(), []);
   const map = useAsync(() => api.songMap(), []);
@@ -104,6 +107,7 @@ export function Library({
           songs.reload();
           map.reload();
           onChanged?.();
+          if (res.notice) onNotice?.(res.notice);
           onOpen(res.songId);
         }}
       />
@@ -356,13 +360,16 @@ function ImportCard({ onImported }: { onImported: (r: ImportResult) => void }) {
       {showContext && (
         <label>
           <div className="cap" style={{ marginBottom: 4 }}>
-            what the model should know
+            what the model should know · how to read it
           </div>
           <textarea
             value={context}
             onChange={(e) => setContext(e.target.value)}
             rows={4}
-            placeholder="e.g. Ending theme of the second season — the singer is the character who dies in episode 9."
+            placeholder={
+              'e.g. Ending theme of the second season — the singer is the character who dies in episode 9.\n' +
+              'Pronunciation instructions count too: 「上」 is うえ throughout, the title is read as a name.'
+            }
           />
         </label>
       )}
@@ -370,10 +377,27 @@ function ImportCard({ onImported }: { onImported: (r: ImportResult) => void }) {
       {error && <div className="error">{error}</div>}
 
       {hits && hits.length > 0 && (
-        <div className="hit-list">
+        <>
+          {/* The video and the notes belong to the import, not to a row. The old
+              layout put a VIDEO ATTACHED tag on the first result and styled its
+              button as the live one, which read as "this is the only one you can
+              add anything to". Said once, above the list, it is true of all. */}
+          <div className="hit-header">
+            <span className="cap">pick the one that matches your recording</span>
+            <span className="spacer" />
+            {(youtube.trim() || context.trim()) && (
+              <span className="faint" style={{ fontSize: 12.5 }}>
+                {[youtube.trim() && 'your video', context.trim() && 'your notes']
+                  .filter(Boolean)
+                  .join(' and ')}{' '}
+                will be attached to whichever you pick
+              </span>
+            )}
+          </div>
+          <div className="hit-list">
           {hits.map((hit, i) => (
             <div
-              className={`hit${i === 0 && hit.japanese ? ' best' : ''}${hit.japanese ? '' : ' dim'}`}
+              className={`hit${i === 0 && hit.japanese ? ' first' : ''}${hit.japanese ? '' : ' dim'}`}
               key={hit.id}
             >
               <Art quiet={!hit.japanese} size={52} />
@@ -388,8 +412,24 @@ function ImportCard({ onImported }: { onImported: (r: ImportResult) => void }) {
                 <div className="mono" style={{ fontSize: 11.5, color: 'var(--muted)' }}>
                   {hit.titleRomaji ? `${hit.titleRomaji} · ` : ''}
                   {hit.artistName}
-                  {hit.duration ? ` · ${formatDuration(hit.duration)}` : ''}
+                  {/* The lyrics' own span is the honest length: LRCLIB's duration
+                      field is crowdsourced and sometimes describes another cut. */}
+                  {hit.lyricSpanSec
+                    ? ` · ${formatDuration(hit.lyricSpanSec)} of lyrics`
+                    : hit.duration
+                      ? ` · ${formatDuration(hit.duration)}`
+                      : ''}
+                  {` · ${hit.lineCount} lines`}
+                  {hit.duplicates > 0 ? ` · ${hit.duplicates + 1} entries, same timings` : ''}
                 </div>
+                {/* Where line one lands. When the same words appear twice with
+                    different timings — a single and an edit with no intro — this is
+                    the number that says which one your video is. */}
+                {hit.lyricStartSec !== null && (
+                  <div className="mono" style={{ fontSize: 11, color: 'var(--faint)' }}>
+                    first line at {formatDuration(hit.lyricStartSec)}
+                  </div>
+                )}
               </div>
               {hit.japanese ? (
                 <span className="tag new">日本語</span>
@@ -397,9 +437,26 @@ function ImportCard({ onImported }: { onImported: (r: ImportResult) => void }) {
                 <span className="tag">NOT JAPANESE</span>
               )}
               {hit.hasSynced && <span className="tag ink">TIMED</span>}
-              {youtube.trim() && i === 0 && <span className="tag outline">VIDEO ATTACHED</span>}
+              {hit.durationMismatch && hit.duration && (
+                <span
+                  className="tag loan"
+                  title={`This entry is filed as ${formatDuration(hit.duration)}, but its timings run to ${formatDuration(hit.lyricSpanSec ?? 0)}. The full lyrics are imported and the length is corrected.`}
+                >
+                  LENGTH SUSPECT
+                </span>
+              )}
+              {i === 0 && hit.japanese && (
+                <span
+                  className="tag outline"
+                  title="Ranked first: Japanese script with timings. Any result below imports exactly the same way."
+                >
+                  BEST MATCH
+                </span>
+              )}
+              {/* Every row gets the same button. Styling one of them as the
+                  primary action made the others look inert. */}
               <button
-                className={i === 0 && hit.japanese ? 'dark' : ''}
+                className="dark"
                 disabled={importingId !== null}
                 onClick={() => importHit(hit)}
               >
@@ -407,7 +464,8 @@ function ImportCard({ onImported }: { onImported: (r: ImportResult) => void }) {
               </button>
             </div>
           ))}
-        </div>
+          </div>
+        </>
       )}
 
       {showPaste && (

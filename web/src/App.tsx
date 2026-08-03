@@ -72,6 +72,8 @@ export function App() {
   const [railSlot, setRailSlot] = useState<HTMLElement | null>(null);
   const [viewCommands, setViewCommands] = useState<Command[]>([]);
   const [paletteOpen, setPaletteOpen] = useState(false);
+  /** One-shot message from an import, shown on the song page it produced. */
+  const [flash, setFlash] = useState<string | null>(null);
 
   const go = useCallback((next: View) => {
     window.location.hash = toHash(next);
@@ -217,6 +219,7 @@ export function App() {
 
           {view.name === 'library' && (
             <Library
+              onNotice={setFlash}
               onOpen={(songId) => {
                 stats.reload();
                 songs.reload();
@@ -232,6 +235,8 @@ export function App() {
           {view.name === 'song' && (
             <SongView
               songId={view.songId}
+              notice={flash}
+              onNoticeSeen={() => setFlash(null)}
               onBack={() => go({ name: 'library' })}
               onStudy={(songId) => go({ name: 'review', options: { songId } })}
             />

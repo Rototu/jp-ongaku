@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { Database } from 'bun:sqlite';
 import { _setDbForTests, getDb } from '../server/db';
-import { buildChunks, analyzeSong } from '../server/llm/analyze';
+import { buildChunks, analyzeSong, readingCandidates } from '../server/llm/analyze';
+import { tokenizeLine } from '../server/nlp/tokenize';
 import { buildLesson } from '../server/lesson/build';
 import { parsePlain } from '../server/lyrics/lrc';
 import { segmentsToReading } from '../server/nlp/furigana';
@@ -160,6 +161,20 @@ describe('reading cross-check against the dictionary', () => {
     expect(chunks[0].readingCheck).toBe('unverified');
   });
 
+  test('an alternate dictionary reading is verified, not flagged as surprising', () => {
+    // こんにち is a listed reading of 今日; only the entry's first kana form used
+    // to count, so the standard alternate was marked unusual.
+    expect(buildChunks('今日', [{ text: '今日', reading: 'きょう' }])![0].readingCheck).toBe(
+      'verified',
+    );
+    expect(buildChunks('今日', [{ text: '今日', reading: 'こんにち' }])![0].readingCheck).toBe(
+      'verified',
+    );
+    expect(buildChunks('明日', [{ text: '明日', reading: 'みょうにち' }])![0].readingCheck).toBe(
+      'verified',
+    );
+  });
+
   test('does not flag inflected forms that are not headwords', () => {
     const chunks = buildChunks('光っている', [{ text: '光っている', reading: 'ひかっている' }])!;
     expect(chunks[0].readingCheck).not.toBe('unverified');
@@ -168,6 +183,68 @@ describe('reading cross-check against the dictionary', () => {
   test('reports unknown for text with no reading to check', () => {
     const chunks = buildChunks('!', [{ text: '!', reading: '' }])!;
     expect(chunks[0].readingCheck).toBe('unknown');
+  });
+
+  test('the model keeps its own reading — the check labels it, it does not overrule it', () => {
+    // The point of the layer: a singer reading 星 as そら is the sort of thing the
+    // dictionary cannot know, so the reading stands and the flag says it is unusual.
+    const chunks = buildChunks('星', [{ text: '星', reading: 'そら' }])!;
+    expect(chunks[0].reading).toBe('そら');
+    expect(segmentsToReading(chunks[0].furigana)).toBe('そら');
+    expect(chunks[0].readingCheck).toBe('unverified');
+  });
+});
+
+/**
+ * The tokenizer commits to one reading and is regularly wrong where the reading
+ * depends on context. The model is the one that can judge that, so it is shown
+ * every reading the dictionary allows rather than a single machine guess.
+ */
+describe('reading candidates offered to the model', () => {
+  const optionsFor = async (line: string) => {
+    const [token] = (await tokenizeLine(line)).filter((t) => !t.filler);
+    return readingCandidates(token);
+  };
+
+  test('offers every dictionary reading for an ambiguous kanji word', async () => {
+    const options = await optionsFor('今日');
+    expect(options.forSurface).toContain('きょう');
+    expect(options.forSurface).toContain('こんにち');
+  });
+
+  test('a kana word reads as itself, not as other spellings of its entries', async () => {
+    // は used to offer はね, borrowed from 羽 through a shared kana term.
+    for (const particle of ['は', 'が', 'の']) {
+      const options = await optionsFor(particle);
+      expect(options.forSurface).toEqual([particle]);
+    }
+  });
+
+  test('an inflected form is not offered its dictionary form as its own reading', async () => {
+    const options = await optionsFor('向いて');
+    expect(options.forSurface).not.toContain('むく');
+    // The lemma's readings are still shown, kept separate and labelled.
+    expect(options.baseForm?.form).toBe('向く');
+    expect(options.baseForm?.readings).toContain('むく');
+  });
+
+  test('candidates are deduplicated and bounded', async () => {
+    const tokens = (await tokenizeLine('夜空に星が光っている')).filter((t) => !t.filler);
+    for (const token of tokens) {
+      const { forSurface } = readingCandidates(token);
+      expect(new Set(forSurface).size).toBe(forSurface.length);
+      expect(forSurface.length).toBeLessThanOrEqual(5);
+    }
+  });
+
+  test('readings offered are always kana, never the kanji back again', async () => {
+    const tokens = (await tokenizeLine('今日は明日の朝を待つ')).filter((t) => !t.filler);
+    for (const token of tokens) {
+      const { forSurface, baseForm } = readingCandidates(token);
+      for (const reading of [...forSurface, ...(baseForm?.readings ?? [])]) {
+        expect(reading).not.toMatch(/\p{Script=Han}/u);
+      }
+    }
   });
 });
 
