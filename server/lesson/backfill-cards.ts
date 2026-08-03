@@ -155,6 +155,56 @@ export function realignWordReadings(): number {
   return fixed;
 }
 
+/**
+ * Fills in `word_songs.seen_as` for links made before the column existed.
+ *
+ * The surface is recoverable without re-importing: every line stores its parsed
+ * tokens, and the token that introduced a word is the one whose dictionary entry
+ * matches the word's lemma and reading. Until this runs, a word whose headword is
+ * not what the lyrics show — の filed under 乃 — has no bar under it, because
+ * nothing on the page can be matched to its SRS state.
+ */
+export function backfillWordSurfaces(): number {
+  const db = getDb();
+  const rows = db
+    .query<
+      { word_id: number; line_id: number; lemma: string; reading: string; tokens: string | null },
+      []
+    >(
+      `SELECT ws.word_id, ws.line_id, w.lemma, w.reading, l.tokens
+       FROM word_songs ws
+       JOIN words w ON w.id = ws.word_id
+       LEFT JOIN lines l ON l.id = ws.line_id
+       WHERE ws.seen_as IS NULL`,
+    )
+    .all();
+
+  const update = db.prepare(
+    'UPDATE word_songs SET seen_as = ? WHERE word_id = ? AND line_id = ?',
+  );
+  let filled = 0;
+
+  db.transaction(() => {
+    for (const row of rows) {
+      if (!row.tokens) continue;
+      let tokens: AnalyzedToken[];
+      try {
+        tokens = JSON.parse(row.tokens) as AnalyzedToken[];
+      } catch {
+        continue;
+      }
+      const match = tokens.find(
+        (t) => t.entry?.headword === row.lemma && t.entry?.reading === row.reading,
+      );
+      if (!match) continue;
+      update.run(match.surface, row.word_id, row.line_id);
+      filled++;
+    }
+  })();
+
+  return filled;
+}
+
 function safeSegments(json: string): { text: string; ruby: string }[] {
   try {
     const parsed = JSON.parse(json);

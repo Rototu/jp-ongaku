@@ -5,7 +5,7 @@ import { buildLesson } from '../server/lesson/build';
 import { seedKatakanaDeck } from '../server/lesson/kana-deck';
 import * as srs from '../server/srs/store';
 import { parsePlain } from '../server/lyrics/lrc';
-import { parseYoutubeId } from '../server/routes/api';
+import { parseYoutubeId, rebuildListeningCards, removeListeningCards } from '../server/routes/api';
 
 /**
  * Fixture lines written by hand for these tests — plain sentences in a lyric
@@ -181,6 +181,109 @@ describe('lesson build', () => {
     expect(audio.startMs).toBe(1000);
     // The clip runs until the next line starts.
     expect(audio.endMs).toBe(5000);
+  });
+});
+
+/**
+ * A song can be pointed at a different upload later: the first video was a live
+ * take, or the wrong song, or went private. Listening cards embed the video id in
+ * their clip, so changing the video has to reach them too.
+ */
+describe('changing a song’s video', () => {
+  async function timedSong(youtubeId: string | null) {
+    const timed = [
+      { text: '夜空に星が光っている', timeMs: 1000 },
+      { text: '君の声を探している', timeMs: 5000 },
+    ];
+    return buildLesson({
+      title: 'Timed Song',
+      artist: 'Test Artist',
+      source: 'paste',
+      youtubeId,
+      lines: timed,
+      raw: timed.map((l) => l.text).join('\n'),
+    });
+  }
+
+  function listening(): { id: number; audio: { youtubeId: string; startMs: number } }[] {
+    return getDb()
+      .query<{ id: number; front: string }, []>(
+        "SELECT id, front FROM cards WHERE kind = 'listening' ORDER BY id",
+      )
+      .all()
+      .map((r) => ({ id: r.id, audio: JSON.parse(r.front).audio }));
+  }
+
+  test('existing listening cards are repointed at the new video', async () => {
+    const { songId } = await timedSong('dQw4w9WgXcQ');
+    const before = listening();
+    expect(before).toHaveLength(2);
+
+    getDb().prepare('UPDATE songs SET youtube_id = ? WHERE id = ?').run('abcdefghijk', songId);
+    rebuildListeningCards(songId);
+
+    const after = listening();
+    expect(after.map((c) => c.audio.youtubeId)).toEqual(['abcdefghijk', 'abcdefghijk']);
+    // Same cards, so the review history survives the swap.
+    expect(after.map((c) => c.id)).toEqual(before.map((c) => c.id));
+    expect(after[0].audio.startMs).toBe(1000);
+  });
+
+  test('a song timed before it had a video gets its listening cards on attach', async () => {
+    const { songId } = await timedSong(null);
+    expect(listening()).toHaveLength(0);
+
+    getDb().prepare('UPDATE songs SET youtube_id = ? WHERE id = ?').run('dQw4w9WgXcQ', songId);
+    rebuildListeningCards(songId);
+
+    expect(listening()).toHaveLength(2);
+  });
+
+  test('review history is kept when a card is repointed', async () => {
+    const { songId } = await timedSong('dQw4w9WgXcQ');
+    const card = listening()[0];
+    getDb()
+      .prepare('INSERT INTO reviews (card_id, ts, quality, ms) VALUES (?, ?, 4, 1200)')
+      .run(card.id, new Date().toISOString());
+
+    getDb().prepare('UPDATE songs SET youtube_id = ? WHERE id = ?').run('abcdefghijk', songId);
+    rebuildListeningCards(songId);
+
+    const kept = getDb()
+      .query<{ n: number }, [number]>('SELECT COUNT(*) AS n FROM reviews WHERE card_id = ?')
+      .get(card.id);
+    expect(kept?.n).toBe(1);
+  });
+
+  test('shifting the timings moves the listening clips with them', async () => {
+    const { songId } = await timedSong('dQw4w9WgXcQ');
+    const db = getDb();
+
+    // The reported case in miniature: lyrics timed 19.5s early for this video.
+    db.prepare(
+      'UPDATE lines SET time_ms = MAX(0, time_ms + ?) WHERE song_id = ? AND time_ms IS NOT NULL',
+    ).run(19_500, songId);
+    rebuildListeningCards(songId);
+
+    const clips = listening();
+    expect(clips.map((c) => c.audio.startMs)).toEqual([20_500, 24_500]);
+    // Same cards, so nothing learnt is lost to a re-sync.
+    expect(clips).toHaveLength(2);
+  });
+
+  test('clearing the video removes the cards that needed it', async () => {
+    const { songId } = await timedSong('dQw4w9WgXcQ');
+    expect(listening()).toHaveLength(2);
+
+    getDb().prepare('UPDATE songs SET youtube_id = NULL WHERE id = ?').run(songId);
+    expect(removeListeningCards(songId)).toBe(2);
+    expect(listening()).toHaveLength(0);
+    // Other card kinds are untouched.
+    expect(
+      getDb()
+        .query<{ n: number }, []>("SELECT COUNT(*) AS n FROM cards WHERE kind = 'vocab'")
+        .get()?.n,
+    ).toBeGreaterThan(0);
   });
 });
 

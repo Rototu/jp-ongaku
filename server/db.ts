@@ -7,7 +7,7 @@ import { USER_DB, ensureDirs } from './paths';
  * back up by hand.
  */
 
-const SCHEMA_VERSION = 6;
+const SCHEMA_VERSION = 7;
 
 let db: Database | null = null;
 
@@ -21,20 +21,28 @@ export function getDb(): Database {
   return db;
 }
 
+/**
+ * Brings a database up to the current schema.
+ *
+ * Every step here is idempotent — `CREATE TABLE IF NOT EXISTS`, and a
+ * `PRAGMA table_info` check before each `ALTER` — so they all run on every boot
+ * rather than behind the recorded version. That version used to gate the work,
+ * which made a single bad state permanent: bump SCHEMA_VERSION, have any process
+ * open the database before its step is written, and the version says "done" while
+ * the column is missing. The recorded version is now a record, not a gate; only
+ * genuinely destructive steps should ever be gated on it.
+ */
 function migrate(d: Database) {
   d.exec(`CREATE TABLE IF NOT EXISTS schema_meta (k TEXT PRIMARY KEY, v TEXT NOT NULL)`);
-  const row = d.query<{ v: string }, []>("SELECT v FROM schema_meta WHERE k = 'version'").get();
-  const current = row ? Number(row.v) : 0;
-  if (current >= SCHEMA_VERSION) return;
 
   createBaseSchema(d);
-  if (current < 2) addTitleAnnotationColumns(d);
-  if (current < 3) addChunkColumn(d);
-  if (current < 4) addSongContextColumn(d);
-  if (current < 5) addFavouriteColumn(d);
+  addTitleAnnotationColumns(d); // v2
+  addChunkColumn(d); // v3
+  addSongContextColumn(d); // v4
+  addFavouriteColumn(d); // v5
   // v6 adds the kanji_mnemonics table, which createBaseSchema above already
-  // covers — a new table needs no step of its own, only the version bump that
-  // gets an existing database past the early return.
+  // covers — a new table needs no step of its own.
+  addSeenAsColumn(d); // v7
 
   d.prepare('INSERT OR REPLACE INTO schema_meta (k, v) VALUES (?, ?)').run(
     'version',
@@ -85,6 +93,18 @@ function addSongContextColumn(d: Database) {
  */
 function addFavouriteColumn(d: Database) {
   addColumn(d, 'songs', 'favourite', 'INTEGER NOT NULL DEFAULT 0');
+}
+
+/**
+ * v7: the surface a word was actually seen as on a line.
+ *
+ * Words are stored under their dictionary headword, which for a kana particle is
+ * often a kanji nobody writes — the possessive の is filed under 乃. Nothing
+ * connected that row back to the の in the lyrics, so the bar under the word
+ * could never find its own SRS state. Recording the surface closes the gap.
+ */
+function addSeenAsColumn(d: Database) {
+  addColumn(d, 'word_songs', 'seen_as', 'TEXT');
 }
 
 function createBaseSchema(d: Database) {
@@ -146,6 +166,9 @@ function createBaseSchema(d: Database) {
       word_id INTEGER NOT NULL REFERENCES words(id) ON DELETE CASCADE,
       song_id INTEGER NOT NULL REFERENCES songs(id) ON DELETE CASCADE,
       line_id INTEGER NOT NULL REFERENCES lines(id) ON DELETE CASCADE,
+      -- The inflected or kana form the word wore on this line, which is what the
+      -- lyrics show and therefore what the bar under a word matches on.
+      seen_as TEXT,
       PRIMARY KEY (word_id, line_id)
     );
 

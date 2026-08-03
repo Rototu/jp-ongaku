@@ -5,7 +5,11 @@ import { join } from 'node:path';
 import { api } from './routes/api';
 import { getDb } from './db';
 import { backfillTitles } from './lesson/titles';
-import { backfillCardReadings, realignWordReadings } from './lesson/backfill-cards';
+import {
+  backfillCardReadings,
+  backfillWordSurfaces,
+  realignWordReadings,
+} from './lesson/backfill-cards';
 import { pruneMismatchedGrammarCards } from './lesson/regrade-grammar';
 import { dict } from './dict';
 import { status as llmStatus } from './llm/provider';
@@ -35,6 +39,13 @@ try {
   const realigned = realignWordReadings();
   if (realigned > 0) {
     console.log(`  realigned readings on ${realigned} vocabulary entr${realigned === 1 ? 'y' : 'ies'}`);
+  }
+
+  // Word-to-line links made before the surface was recorded, without which a
+  // word whose headword differs from the lyrics gets no bar under it.
+  const surfaced = backfillWordSurfaces();
+  if (surfaced > 0) {
+    console.log(`  recorded the surface form on ${surfaced} word/line link${surfaced === 1 ? '' : 's'}`);
   }
 } catch (err) {
   console.error('[cards] reading backfill failed:', err);

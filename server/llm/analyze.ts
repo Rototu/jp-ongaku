@@ -47,6 +47,16 @@ Absolute rules:
   spaces, and any latin or symbol characters.
 - Readings must be in hiragana only (katakana words are still read in hiragana), matching how the
   word is actually pronounced in this line.
+- The reading is your judgement, not a lookup. Each segment comes with the readings a dictionary
+  offers for it; they are candidates, in no particular order of correctness for THIS line. Choose the
+  one actually sung here — 今日 is きょう or こんにち depending on the line, 上 is うえ or じょう or
+  かみ, and a name can be read a way no dictionary lists. If the sung reading is not among the
+  candidates, give it anyway and say in that segment's explanation why it differs.
+- Where the learner's background notes tell you how something is pronounced, that instruction wins
+  over both the dictionary and your own default.
+- If the notes give a reading that covers several words, segment so that one segment carries it. A
+  stylised lyric may write four kanji and be sung as one short word; splitting it and reading each
+  half literally contradicts the reading you were given. Say what happened in the explanation.
 - Segment into meaningful learning units: a word plus its inflection is ONE segment
   (探している, 忘れたくない), a set expression is ONE segment, but case particles
   (は, が, を, に, で, の, も) are their own segments.
@@ -354,7 +364,10 @@ function checkReading(
 
   const entries = d.entriesFor(text);
   if (entries.length > 0) {
-    if (entries.some((e) => e.reading === reading)) return 'verified';
+    // Against every reading the dictionary allows, not just each entry's first
+    // kana form: 今日 as こんにち is standard, and flagging it as surprising
+    // trained the user to distrust a marker that was itself wrong.
+    if (d.readingsFor(text).includes(reading)) return 'verified';
     return 'unverified';
   }
 
@@ -370,6 +383,47 @@ function checkReading(
   }
 
   return 'unknown';
+}
+
+/**
+ * The readings this song has already settled on, surface -> reading.
+ *
+ * Built from the analysed chunks, which is where a song's own pronunciations live:
+ * a stylised reading the singer uses, a name read a way no dictionary lists, a
+ * compound the model decided by context. Anything that quotes the song's Japanese
+ * later — a grammar note, an explanation, a generated example — has to agree with
+ * what the lyrics above it already show, so this map is what those quotes are
+ * annotated against.
+ *
+ * Only chunks carrying kanji matter: kana needs no ruby, and mapping it would
+ * shadow ordinary words for no gain.
+ */
+export function songReadings(songId: number): Map<string, string> {
+  const rows = getDb()
+    .query<{ chunks: string }, [number]>(
+      `SELECT a.chunks FROM line_analysis a
+         JOIN lines l ON l.id = a.line_id
+       WHERE l.song_id = ? AND a.chunks IS NOT NULL AND a.chunks != '[]'`,
+    )
+    .all(songId);
+
+  const readings = new Map<string, string>();
+  for (const row of rows) {
+    let chunks: AiChunk[];
+    try {
+      chunks = JSON.parse(row.chunks) as AiChunk[];
+    } catch {
+      continue;
+    }
+    for (const chunk of chunks) {
+      if (!chunk.text || !chunk.reading) continue;
+      if (!/[一-鿿]/.test(chunk.text)) continue;
+      // First writer wins: a word read one way in verse one and another in the
+      // chorus is rare, and re-reading it per quote would be worse than steady.
+      if (!readings.has(chunk.text)) readings.set(chunk.text, chunk.reading);
+    }
+  }
+  return readings;
 }
 
 /**
@@ -391,14 +445,83 @@ export function songContext(songId: number): string | null {
 
 function contextBlock(context: string | null): string {
   if (!context) return '';
-  return `Background the learner supplied about this song. Use it to pick the right sense of a
-word, the right speaker, and a translation that fits what the song is actually about. It is
-context, not text to translate, and it never overrides the lines themselves:
+  return `Background and instructions the learner supplied for this song. Use it to pick the right
+sense of a word, the right speaker, and a translation that fits what the song is actually about.
+If it says how something is pronounced — a name, a coined word, a kanji the singer reads their own
+way — follow that over any dictionary reading. It is context and instruction, not text to translate,
+and it never changes the characters of the lines themselves:
 """
 ${context}
 """
 
 `;
+}
+
+/** How many dictionary readings to offer per token, to bound the prompt. */
+const MAX_READING_CANDIDATES = 5;
+
+export interface ReadingOptions {
+  /** Readings the dictionary lists for the segment exactly as written. */
+  forSurface: string[];
+  /**
+   * The dictionary form and its readings, when the surface is inflected. Kept
+   * apart from `forSurface` because they are not readings *of* the surface: 行って
+   * is いって or おこなって depending on whether the lemma is 行く or 行う, and the
+   * model needs to see that fork without being invited to answer いく.
+   */
+  baseForm: { form: string; readings: string[] } | null;
+  /** What the tokenizer heard — for an inflected form, often the only guide. */
+  parsed: string;
+}
+
+/**
+ * Everything known about how a token could be read, for the model to choose from.
+ *
+ * The tokenizer commits to one reading and is regularly wrong where the reading
+ * depends on context, which is most of the interesting cases: 今日, 上, 明日, every
+ * name. Handing the model that single guess as though it were the answer made the
+ * readings only as good as kuromoji's. Handing over the whole candidate set lets it
+ * do the thing it is actually better at — choosing by context.
+ */
+export function readingCandidates(token: AnalyzedToken): ReadingOptions {
+  const d = dict();
+  const kana = (raw: string | undefined | null) => hiragana((raw ?? '').trim());
+  const dedupe = (list: string[]) => {
+    const out: string[] = [];
+    for (const item of list) if (item && !out.includes(item)) out.push(item);
+    return out.slice(0, MAX_READING_CANDIDATES);
+  };
+
+  const forSurface = d.available ? dedupe(d.readingsFor(token.surface).map(kana)) : [];
+
+  const base = token.baseForm && token.baseForm !== token.surface ? token.baseForm : null;
+  const baseReadings = base && d.available ? dedupe(d.readingsFor(base).map(kana)) : [];
+
+  return {
+    forSurface,
+    baseForm: base && baseReadings.length > 0 ? { form: base, readings: baseReadings } : null,
+    parsed: kana(token.reading),
+  };
+}
+
+/** One token's readings as a line of the prompt. */
+function readingHint(options: ReadingOptions): string {
+  const parts: string[] = [];
+  if (options.forSurface.length > 0) {
+    parts.push(`readings to choose from: ${options.forSurface.join('|')}`);
+  }
+  if (options.baseForm) {
+    parts.push(`dictionary form ${options.baseForm.form}: ${options.baseForm.readings.join('|')}`);
+  }
+  // With nothing from the dictionary the model is on its own — a coined word or a
+  // name — and should know that the one reading it has is a machine guess.
+  if (parts.length === 0) {
+    return `no dictionary entry; parsed as ${options.parsed || '?'}`;
+  }
+  if (options.parsed && !options.forSurface.includes(options.parsed)) {
+    parts.push(`parser guessed ${options.parsed}`);
+  }
+  return parts.join('; ');
 }
 
 function buildPrompt(batch: LineRow[], retry: boolean, context: string | null = null): string {
@@ -409,7 +532,7 @@ function buildPrompt(batch: LineRow[], retry: boolean, context: string | null = 
       .map((t) => {
         const gloss =
           t.functionGloss ?? t.entry?.senses[0]?.glosses.slice(0, 2).join('/') ?? '?';
-        return `${t.surface}(${t.reading}=${gloss})`;
+        return `${t.surface}(=${gloss}; ${readingHint(readingCandidates(t))})`;
       })
       .join(' ');
     return `${r.idx}\t${r.text}\n\tlocal parse (may be wrong, trust the line): ${breakdown}`;
@@ -433,7 +556,7 @@ For each line return:
   "segments": [
     {
       "text": "<exact substring of the line>",
-      "reading": "<hiragana reading of this segment as pronounced here>",
+      "reading": "<hiragana reading as sung here — your choice among the candidates offered, or your own if none of them fit>",
       "role": "<start with one of: noun, pronoun, verb, adjective, particle, expression, adverb — then any detail, e.g. 'noun (subject)', 'verb, progressive', 'particle (topic)'>",
       "meaning": "<what this segment means on its own, a few words>",
       "explanation": "<one or two sentences: why this form, what it does here, any contraction or slang>"

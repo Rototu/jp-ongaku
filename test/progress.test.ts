@@ -53,6 +53,7 @@ function addCard(opts: {
   reps?: number;
   lapses?: number;
   leech?: boolean;
+  suspended?: boolean;
   dueDaysFromNow?: number;
 }): number {
   const db = getDb();
@@ -72,7 +73,8 @@ function addCard(opts: {
 
   const due = new Date(Date.now() + (opts.dueDaysFromNow ?? -1) * 86_400_000).toISOString();
   db.prepare(
-    `INSERT INTO srs (card_id, interval_days, reps, lapses, due_at, leech) VALUES (?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO srs (card_id, interval_days, reps, lapses, due_at, leech, suspended)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     card.id,
     opts.intervalDays ?? 0,
@@ -80,6 +82,7 @@ function addCard(opts: {
     opts.lapses ?? 0,
     due,
     opts.leech ? 1 : 0,
+    opts.suspended ? 1 : 0,
   );
   return card.id;
 }
@@ -102,6 +105,21 @@ describe('mastery', () => {
 
   test('a card that has lapsed at all stays short of the top', () => {
     expect(srs.mastery({ intervalDays: 60, reps: 6, lapses: 1, leech: false })).toBe(88);
+  });
+
+  test('a retired card reads as fully known, whatever its interval', () => {
+    expect(
+      srs.mastery({ intervalDays: 0, reps: 0, lapses: 0, leech: false, suspended: true }),
+    ).toBe(100);
+    expect(
+      srs.mastery({ intervalDays: 1, reps: 2, lapses: 0, leech: false, suspended: true }),
+    ).toBe(100);
+  });
+
+  test('retiring a leech outranks its lapse history', () => {
+    expect(
+      srs.mastery({ intervalDays: 200, reps: 9, lapses: 5, leech: true, suspended: true }),
+    ).toBe(100);
   });
 });
 
@@ -178,6 +196,42 @@ describe('song map', () => {
     const [row] = srs.songMap();
     expect(row.cells[0].trouble).toBe(true);
     expect(row.cells[0].mastery).toBeLessThanOrEqual(40);
+  });
+
+  test('a retired line is fully shaded and stops being flagged', () => {
+    const { songId, lineIds } = seedSong('Retired', 1);
+    addCard({
+      kind: 'cloze',
+      songId,
+      lineId: lineIds[0],
+      intervalDays: 1,
+      reps: 2,
+      lapses: 4,
+      leech: true,
+      suspended: true,
+    });
+
+    const [row] = srs.songMap();
+    expect(row.cells[0].mastery).toBe(100);
+    expect(row.cells[0].trouble).toBe(false);
+    expect(row.percent).toBe(100);
+  });
+
+  test('a line retired before it was ever answered still counts as studied', () => {
+    const { songId, lineIds } = seedSong('Retired early', 1);
+    addCard({ kind: 'vocab', songId, lineId: lineIds[0], reps: 0, suspended: true });
+
+    const [row] = srs.songMap();
+    expect(row.cells[0].mastery).toBe(100);
+  });
+
+  test('one retired card among several does not shade the line as known', () => {
+    const { songId, lineIds } = seedSong('Mixed', 1);
+    addCard({ kind: 'vocab', songId, lineId: lineIds[0], reps: 0, suspended: true });
+    addCard({ kind: 'cloze', songId, lineId: lineIds[0], reps: 0 });
+
+    const [row] = srs.songMap();
+    expect(row.cells[0].mastery).toBe(-1);
   });
 
   test('favourites lead the map', () => {

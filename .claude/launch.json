@@ -13,6 +13,12 @@
       "runtimeExecutable": "bun",
       "runtimeArgs": ["run", "dev"],
       "port": 5273
+    },
+    {
+      "name": "jp-ongaku-web",
+      "runtimeExecutable": "bunx",
+      "runtimeArgs": ["vite"],
+      "port": 5273
     }
   ]
 }

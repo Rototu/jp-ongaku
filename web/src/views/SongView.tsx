@@ -4,7 +4,7 @@ import { useAsync } from '../lib/useAsync';
 import { useCommands, useRail } from '../lib/shell';
 import type { AnalyzedTokenView } from '../lib/types';
 import { Furigana } from '../components/Furigana';
-import { RubyText } from '../components/RubyText';
+import { RubyText, SongReadings } from '../components/RubyText';
 import { WordPanel } from '../components/WordPanel';
 import { YouTubePlayer, type PlayerHandle } from '../components/YouTubePlayer';
 import { ChunkedLine, type ChunkMastery } from '../components/ChunkedLine';
@@ -25,19 +25,22 @@ export function SongView({
   songId,
   onStudy,
   onBack,
+  notice,
+  onNoticeSeen,
 }: {
   songId: number;
   onStudy: (songId: number) => void;
   onBack: () => void;
+  /** Carried over from an import that had to correct the source metadata. */
+  notice?: string | null;
+  onNoticeSeen?: () => void;
 }) {
   const song = useAsync(() => api.song(songId), [songId]);
   const words = useAsync(() => api.songWords(songId), [songId]);
   const trouble = useAsync(() => api.trouble(songId), [songId]);
+  const settings = useAsync(() => api.settings(), []);
 
-  const [selected, setSelected] = useState<{
-    token: AnalyzedTokenView;
-    lineText: string;
-  } | null>(null);
+  const [selectedToken, setSelectedToken] = useState<{ lineId: number; idx: number } | null>(null);
   const [player, setPlayer] = useState<PlayerHandle | null>(null);
   const [positionMs, setPositionMs] = useState(0);
   const [playing, setPlaying] = useState(false);
@@ -46,32 +49,60 @@ export function SongView({
   const [pendingTimings, setPendingTimings] = useState<{ idx: number; timeMs: number }[]>([]);
   const [analysis, setAnalysis] = useState<AnalysisJob | null>(null);
   const [segmented, setSegmented] = useState(0);
-  const [analyzeMsg, setAnalyzeMsg] = useState<string | null>(null);
+  const [analyzeMsg, setAnalyzeMsg] = useState<string | null>(notice ?? null);
   const [showRomaji, setShowRomaji] = useState(true);
   const [videoInput, setVideoInput] = useState('');
-  const [editing, setEditing] = useState<'reading' | 'context' | 'video' | null>(null);
+  const [editing, setEditing] = useState<'reading' | 'context' | 'video' | 'offset' | null>(null);
   const [selectedChunk, setSelectedChunk] = useState<{ lineId: number; idx: number } | null>(null);
   const [stage, setStage] = useState(false);
   const [focusVerse, setFocusVerse] = useState<number | null>(null);
   const activeLineRef = useRef<HTMLDivElement | null>(null);
   const barRef = useRef<HTMLDivElement | null>(null);
 
+  // The import message is a one-shot: it belongs to the page it opened, and
+  // should not come back when the same song is opened again later.
+  useEffect(() => {
+    if (notice) onNoticeSeen?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  /**
+   * Three ways to find the word behind a piece of the line, tried in that order.
+   *
+   * Lemma alone is not enough. Words are stored under their dictionary headword,
+   * and for kana grammar that headword can be a kanji the song never writes — the
+   * possessive の is filed under 乃 — so the surfaces the word was actually seen
+   * as carry the match. The reading is the last resort, for chunks the AI split
+   * differently from the offline parse.
+   */
   const wordIndex = useMemo(() => {
     const byKey = new Map<string, SongWord>();
     const byLemma = new Map<string, SongWord>();
+    const bySurface = new Map<string, SongWord>();
     for (const w of words.data?.words ?? []) {
       byKey.set(`${w.lemma}|${w.reading}`, w);
       if (!byLemma.has(w.lemma)) byLemma.set(w.lemma, w);
+      for (const surface of w.seenAs) {
+        byKey.set(`${surface}|${w.reading}`, w);
+        // First writer wins, so the highest-priority word keeps an ambiguous
+        // surface: the list arrives ordered by priority.
+        if (!bySurface.has(surface)) bySurface.set(surface, w);
+      }
     }
-    return { byKey, byLemma };
+    return { byKey, byLemma, bySurface };
   }, [words.data]);
 
   /** How well the word behind a chunk is known, for the bar under the text. */
   const masteryOf = useCallback(
     (chunk: AiChunk): ChunkMastery | null => {
       const word =
-        wordIndex.byKey.get(`${chunk.text}|${chunk.reading}`) ?? wordIndex.byLemma.get(chunk.text);
+        wordIndex.byKey.get(`${chunk.text}|${chunk.reading}`) ??
+        wordIndex.byLemma.get(chunk.text) ??
+        wordIndex.bySurface.get(chunk.text);
       if (!word || !word.enrolled) return null;
+      // A retired word carries a full bar and no trouble flag: the user took it
+      // out of the rotation, so the lapses behind it are history, not a warning.
+      if (word.retired) return { value: 100, trouble: false };
       return { value: word.mastery, trouble: word.lapses >= 3 };
     },
     [wordIndex],
@@ -83,6 +114,16 @@ export function SongView({
   );
 
   const lines = song.data?.lines ?? [];
+
+  /**
+   * Whether a line the model has not read yet may show the offline parse's ruby.
+   *
+   * Off by default. The local parse commits to one reading per word and is wrong
+   * exactly where songs are interesting — a stylised reading, a name, a compound
+   * whose reading depends on the line — and a confident wrong reading is worse than
+   * none, because it is the thing the learner memorises.
+   */
+  const offlineReadings = (settings.data?.settings.lyric_readings ?? 'ai') === 'dictionary';
 
   /** Index of the lyric line that should be highlighted right now. */
   const activeIdx = useMemo(() => {
@@ -271,6 +312,15 @@ export function SongView({
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
+  /**
+   * Opens the video field with the current link already in it, so changing a
+   * video is an edit rather than typing an id out again from memory.
+   */
+  const openVideoEditor = () => {
+    setVideoInput(song.data?.youtubeId ?? '');
+    setEditing('video');
+  };
+
   const attachVideo = async () => {
     if (!videoInput.trim()) return;
     try {
@@ -279,7 +329,17 @@ export function SongView({
       setEditing(null);
       song.reload();
     } catch (err) {
-      setAnalyzeMsg(err instanceof Error ? err.message : 'Could not attach the video');
+      setAnalyzeMsg(err instanceof Error ? err.message : 'Could not change the video');
+    }
+  };
+
+  /** Moves every line by one offset, for lyrics timed against a different cut. */
+  const shiftTimings = async (ms: number) => {
+    try {
+      await api.updateSong(songId, { shiftMs: ms });
+      song.reload();
+    } catch (err) {
+      setAnalyzeMsg(err instanceof Error ? err.message : 'Could not move the timings');
     }
   };
 
@@ -379,6 +439,13 @@ export function SongView({
       run: startSync,
     },
     {
+      id: 'song-offset',
+      label: 'Move all the timings earlier or later',
+      hint: 'lyrics from another cut',
+      where: 'Song',
+      run: () => setEditing('offset'),
+    },
+    {
       id: 'song-reading',
       label: 'Fix the title reading',
       where: 'Song',
@@ -394,7 +461,7 @@ export function SongView({
       id: 'song-video',
       label: detail?.youtubeId ? 'Change the video link' : 'Attach a video link',
       where: 'Song',
-      run: () => setEditing('video'),
+      run: openVideoEditor,
     },
     { id: 'song-back', label: 'Back to the library', where: 'Song', run: onBack },
   ]);
@@ -409,6 +476,10 @@ export function SongView({
   const durationMs = detail.durationMs ?? (lines.at(-1)?.timeMs ?? 0) + 8000;
 
   return (
+    // Everything on this page that quotes the song's Japanese — grammar notes,
+    // explanations, generated examples — is annotated with the song's own readings
+    // rather than the dictionary's, so a note can never contradict the line above it.
+    <SongReadings songId={songId}>
     <div className="song-page">
       {rail}
       <div className="stage-bar" ref={barRef}>
@@ -427,7 +498,7 @@ export function SongView({
             <div className="cap" style={{ color: 'var(--sage-dim)' }}>
               no video yet
             </div>
-            <button className="forest small" onClick={() => setEditing('video')}>
+            <button className="forest small" onClick={openVideoEditor}>
               Attach one
             </button>
           </div>
@@ -448,6 +519,26 @@ export function SongView({
             </span>
             {detail.synced && <span className="tag">TIMED</span>}
             {detail.analyzed && <span className="tag">EXPLAINED</span>}
+            {/* The palette carries this too, but a wrong video is something you
+                notice while looking at it, so the control lives next to it. */}
+            {detail.youtubeId && (
+              <button
+                className="forest small"
+                onClick={openVideoEditor}
+                title="Point this song at a different YouTube video"
+              >
+                ↺ Change video
+              </button>
+            )}
+            {detail.synced && (
+              <button
+                className="forest small"
+                onClick={() => setEditing('offset')}
+                title="Lines arriving early or late against this video? Move them all at once."
+              >
+                ◷ Timings
+              </button>
+            )}
           </div>
 
           <div className="scrub">
@@ -592,21 +683,50 @@ export function SongView({
             />
           )}
           {editing === 'video' && (
-            <div className="card row">
-              <input
-                placeholder="Paste a YouTube link — unlocks sing-along, stage mode and listening cards"
-                value={videoInput}
-                onChange={(e) => setVideoInput(e.target.value)}
-                style={{ flex: 1, minWidth: 240 }}
-                autoFocus
-              />
-              <button className="primary" onClick={attachVideo} disabled={!videoInput.trim()}>
-                Attach
-              </button>
-              <button className="ghost" onClick={() => setEditing(null)}>
-                Cancel
-              </button>
+            <div className="card stack">
+              <div className="cap">
+                {detail.youtubeId
+                  ? `currently playing youtube.com/watch?v=${detail.youtubeId} — paste another link or id`
+                  : 'paste a youtube link — unlocks sing-along, stage mode and listening cards'}
+              </div>
+              <div className="row">
+                <input
+                  placeholder="https://youtube.com/watch?v=… or the 11-character id"
+                  value={videoInput}
+                  onChange={(e) => setVideoInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') void attachVideo();
+                    if (e.key === 'Escape') setEditing(null);
+                  }}
+                  style={{ flex: 1, minWidth: 240 }}
+                  autoFocus
+                />
+                <button
+                  className="primary"
+                  onClick={attachVideo}
+                  disabled={!videoInput.trim() || videoInput.trim() === detail.youtubeId}
+                >
+                  {detail.youtubeId ? 'Change video' : 'Attach'}
+                </button>
+                <button className="ghost" onClick={() => setEditing(null)}>
+                  Cancel
+                </button>
+              </div>
+              {detail.synced && (
+                <span className="faint" style={{ fontSize: 13 }}>
+                  The line timings stay as they are — if the new video starts at a different point,
+                  move them all with ◷ Timings.
+                </span>
+              )}
             </div>
+          )}
+          {editing === 'offset' && (
+            <OffsetEditor
+              firstLineMs={lines.find((l) => l.timeMs !== null)?.timeMs ?? null}
+              positionMs={positionMs}
+              onShift={shiftTimings}
+              onClose={() => setEditing(null)}
+            />
           )}
         </div>
       )}
@@ -700,14 +820,20 @@ export function SongView({
                           trouble.data?.lines.find((l) => l.lineId === line.id)?.lapses ?? 0
                         }
                         showRomaji={showRomaji}
+                        offlineReadings={offlineReadings}
                         masteryOf={masteryOf}
                         selectedChunk={selectedChunk?.lineId === line.id ? selectedChunk.idx : null}
                         onSelectChunk={(idx) =>
                           setSelectedChunk(idx === null ? null : { lineId: line.id, idx })
                         }
-                        onSelect={(token) =>
-                          setSelected({ token: enrich(token), lineText: line.text })
+                        selectedToken={
+                          selectedToken?.lineId === line.id ? selectedToken.idx : null
                         }
+                        onSelectToken={(idx) =>
+                          setSelectedToken(idx === null ? null : { lineId: line.id, idx })
+                        }
+                        enrich={enrich}
+                        onEnrolled={words.reload}
                         onSeek={
                           line.timeMs !== null && player
                             ? () => {
@@ -730,21 +856,6 @@ export function SongView({
         />
       </div>
 
-      {selected && (
-        <WordPanel
-          token={selected.token}
-          lineText={selected.lineText}
-          songId={songId}
-          onClose={() => setSelected(null)}
-          onEnrolled={() => {
-            words.reload();
-            setSelected((prev) =>
-              prev ? { ...prev, token: { ...prev.token, inDeck: true } } : prev,
-            );
-          }}
-        />
-      )}
-
       {stage && (
         <Stage
           title={detail.title}
@@ -764,6 +875,7 @@ export function SongView({
         />
       )}
     </div>
+    </SongReadings>
   );
 }
 
@@ -836,6 +948,10 @@ function ReadingEditor({
  * Notes about the song, handed to the model whenever it explains a line, a word
  * or an example. Most songs need nothing here — but where the meaning depends on
  * who is singing, no amount of grammar recovers it.
+ *
+ * It is also where pronunciation instructions go: the dictionary lists what a
+ * kanji *can* be read as, and an instruction here outranks it, so a name or a
+ * singer's own reading can be fixed for the whole song in one place.
  */
 function ContextEditor({
   value,
@@ -852,7 +968,7 @@ function ContextEditor({
 
   return (
     <div className="card">
-      <div className="cap">what the model should know about this song</div>
+      <div className="cap">what the model should know about this song · how to read it</div>
       <textarea
         value={text}
         onChange={(e) => {
@@ -861,8 +977,15 @@ function ContextEditor({
         }}
         rows={5}
         style={{ marginTop: 8 }}
-        placeholder="e.g. Sung by the younger sister after her brother leaves — 「あの人」 throughout is him, not a lover."
+        placeholder={
+          'e.g. Sung by the younger sister after her brother leaves — 「あの人」 throughout is him, not a lover.\n' +
+          'Pronunciation instructions belong here too: 「今日」 is こんにち in this song, 「宵星」 is read よいぼし.'
+        }
       />
+      <div className="faint" style={{ fontSize: 12.5, marginTop: 6 }}>
+        Readings are chosen by the AI from every reading the dictionary allows — anything you say here
+        outranks both.
+      </div>
       <div className="row" style={{ marginTop: 8 }}>
         <button
           className="primary small"
@@ -892,6 +1015,104 @@ function ContextEditor({
   );
 }
 
+/**
+ * Moves every line of the song by one offset.
+ *
+ * Crowdsourced lyrics are often timed against a different cut — an opening-theme
+ * edit with no intro, a stream master with a longer one — and then the spacing is
+ * right while the start is wrong, so every line arrives the same amount early or
+ * late. Tapping the whole song again to correct a constant is the wrong tool; this
+ * takes the constant. The fastest way to find it is to play up to the moment the
+ * first line is sung and let the field read it off the clock.
+ */
+function OffsetEditor({
+  firstLineMs,
+  positionMs,
+  onShift,
+  onClose,
+}: {
+  /** Where the first timed line currently sits, the thing being corrected. */
+  firstLineMs: number | null;
+  /** Playhead, so "it should start here" can be taken from the video itself. */
+  positionMs: number;
+  onShift: (ms: number) => Promise<void>;
+  onClose: () => void;
+}) {
+  const [seconds, setSeconds] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  const typed = Number(seconds);
+  const ready = seconds.trim() !== '' && Number.isFinite(typed) && typed !== 0;
+
+  const apply = async (ms: number) => {
+    setBusy(true);
+    try {
+      await onShift(ms);
+      setSeconds('');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // What the offset would be if the first line belongs where the video is now.
+  const fromPlayhead =
+    firstLineMs === null ? null : Math.round((positionMs - firstLineMs) / 100) / 10;
+
+  return (
+    <div className="card stack">
+      <div className="cap">
+        move every line{firstLineMs !== null ? ` · first line at ${clock(firstLineMs)}` : ''}
+      </div>
+      <div className="row">
+        {[-1, -0.5, 0.5, 1].map((step) => (
+          <button
+            key={step}
+            className="ghost small"
+            disabled={busy}
+            onClick={() => apply(step * 1000)}
+          >
+            {step > 0 ? `+${step}s later` : `${step}s earlier`}
+          </button>
+        ))}
+        <span className="spacer" />
+        <input
+          value={seconds}
+          onChange={(e) => setSeconds(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && ready) void apply(typed * 1000);
+            if (e.key === 'Escape') onClose();
+          }}
+          placeholder="e.g. 19.5"
+          inputMode="decimal"
+          style={{ width: 110 }}
+          autoFocus
+        />
+        <button className="primary small" disabled={busy || !ready} onClick={() => apply(typed * 1000)}>
+          {busy ? 'Moving…' : 'Move by seconds'}
+        </button>
+        <button className="ghost small" onClick={onClose}>
+          Close
+        </button>
+      </div>
+      {fromPlayhead !== null && Math.abs(fromPlayhead) >= 0.5 && (
+        <div className="row">
+          <button className="dark small" disabled={busy} onClick={() => apply(fromPlayhead * 1000)}>
+            First line starts here ({fromPlayhead > 0 ? '+' : ''}
+            {fromPlayhead}s)
+          </button>
+          <span className="faint" style={{ fontSize: 12.5 }}>
+            Pause the video the moment line one is sung, then press this.
+          </span>
+        </div>
+      )}
+      <span className="faint" style={{ fontSize: 12.5 }}>
+        Positive moves the lyrics later, for lyrics timed to a cut with a shorter intro.
+        Listening clips move with them.
+      </span>
+    </div>
+  );
+}
+
 function LyricLine({
   line,
   lineNumber,
@@ -902,10 +1123,14 @@ function LyricLine({
   trouble,
   lapses,
   showRomaji,
+  offlineReadings,
   masteryOf,
   selectedChunk,
   onSelectChunk,
-  onSelect,
+  selectedToken,
+  onSelectToken,
+  enrich,
+  onEnrolled,
   onSeek,
   innerRef,
 }: {
@@ -918,10 +1143,15 @@ function LyricLine({
   trouble: boolean;
   lapses: number;
   showRomaji: boolean;
+  /** Whether the offline parse's ruby may stand in until the model has read this line. */
+  offlineReadings: boolean;
   masteryOf: (chunk: AiChunk) => ChunkMastery | null;
   selectedChunk: number | null;
   onSelectChunk: (idx: number | null) => void;
-  onSelect: (token: AnalyzedTokenView) => void;
+  selectedToken: number | null;
+  onSelectToken: (idx: number | null) => void;
+  enrich: (token: AnalyzedTokenView) => AnalyzedTokenView;
+  onEnrolled: () => void;
   onSeek?: () => void;
   innerRef?: React.RefObject<HTMLDivElement>;
 }) {
@@ -979,15 +1209,21 @@ function LyricLine({
               ) : (
                 <span
                   key={i}
-                  className={`chunk c${localColors[i]}`}
-                  onClick={() => onSelect(token)}
+                  className={`chunk c${localColors[i]}${selectedToken === i ? ' selected' : ''}`}
+                  onClick={() => onSelectToken(selectedToken === i ? null : i)}
                   title={
                     token.functionGloss ??
                     token.entry?.senses[0]?.glosses.slice(0, 2).join('; ') ??
                     token.surface
                   }
                 >
-                  <Furigana segments={token.furigana} />
+                  {offlineReadings ? (
+                    <Furigana segments={token.furigana} />
+                  ) : (
+                    // Plain, until the model has read the line. The segmentation
+                    // and the colours are still useful; the guessed reading is not.
+                    token.surface
+                  )}
                   <span className="mastery">
                     <span style={{ width: token.inDeck ? '100%' : '0%' }} />
                   </span>
@@ -995,7 +1231,7 @@ function LyricLine({
               ),
             )}
           </div>
-          {showRomaji && (
+          {showRomaji && offlineReadings && (
             <div className="romaji">
               {tokens.map((token, i) =>
                 token.filler ? (
@@ -1007,6 +1243,22 @@ function LyricLine({
                 ),
               )}
             </div>
+          )}
+          {!offlineReadings && (
+            <div className="cap" style={{ marginTop: 6 }}>
+              readings appear once the AI has read this line
+            </div>
+          )}
+          {selectedToken !== null && tokens[selectedToken] && (
+            <WordPanel
+              key={`${line.id}-${selectedToken}`}
+              token={enrich(tokens[selectedToken])}
+              colorIdx={localColors[selectedToken]}
+              lineText={line.text}
+              songId={songId}
+              onClose={() => onSelectToken(null)}
+              onEnrolled={onEnrolled}
+            />
           )}
         </>
       )}
@@ -1051,7 +1303,8 @@ function WordGarden({ words, onChanged }: { words: SongWord[]; onChanged: () => 
   const enrolled = words.filter((w) => w.enrolled);
   const songOnly = words.filter((w) => !w.enrolled);
   const hard = words.filter((w) => (w.jlpt ?? 5) <= 4);
-  const troubled = words.filter((w) => w.lapses >= 3);
+  // Retired words leave the trouble pile: they are no longer coming back to fail.
+  const troubled = words.filter((w) => w.lapses >= 3 && !w.retired);
   const worthKeeping = songOnly.filter((w) => (w.jlpt ?? 5) <= 4 || w.priority >= 60);
 
   const shown =
@@ -1124,7 +1377,9 @@ function WordGarden({ words, onChanged }: { words: SongWord[]; onChanged: () => 
         {shown.slice(0, 40).map((word) => (
           <div
             key={word.id}
-            className={`word-card${word.enrolled ? '' : ' songonly'}${word.lapses >= 3 ? ' trouble' : ''}`}
+            className={`word-card${word.enrolled ? '' : ' songonly'}${
+              word.lapses >= 3 && !word.retired ? ' trouble' : ''
+            }`}
           >
             <div className="top">
               <span className="term">
@@ -1147,9 +1402,17 @@ function WordGarden({ words, onChanged }: { words: SongWord[]; onChanged: () => 
             {word.enrolled ? (
               <div className="meta">
                 {word.jlpt && <span className="tag jlpt">N{word.jlpt}</span>}
-                {word.lapses >= 3 && <span className="tag leech">TROUBLE</span>}
+                {word.retired ? (
+                  <span className="tag" title="Retired from reviews — counted as known.">
+                    RETIRED
+                  </span>
+                ) : (
+                  word.lapses >= 3 && <span className="tag leech">TROUBLE</span>
+                )}
                 <span className="mono faint" style={{ fontSize: 9.5 }}>
-                  {dueLabel(word.dueAt) ?? (word.mastery === 0 ? 'not started' : '')}
+                  {word.retired
+                    ? 'no longer reviewed'
+                    : (dueLabel(word.dueAt) ?? (word.mastery === 0 ? 'not started' : ''))}
                 </span>
               </div>
             ) : (

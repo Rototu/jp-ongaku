@@ -101,6 +101,43 @@ class Dict {
   }
 
   /**
+   * Every reading the dictionary lists for a term, most standard first.
+   *
+   * `entriesFor` carries one reading per entry — the first kana form — because an
+   * entry needs a single lemma reading to display. But JMdict lists all of them
+   * against the same entry, and the alternates are exactly the interesting ones:
+   * 今日 is きょう / こんにち / こんじつ, 明日 is あした / あす / みょうにち. They
+   * survive in the terms index, so reading a word's possibilities costs one query
+   * and no rebuild. Ordering is entry commonness, then JMdict's own order within
+   * an entry, which puts the standard reading first.
+   */
+  readingsFor(term: string): string[] {
+    if (!this.db) return [];
+    // A term already written in kana reads as itself. Looking it up would drag in
+    // the other kana forms of whatever entries happen to share it — は would offer
+    // はね (from 羽), が would offer ヶ and け — which are alternative spellings of
+    // other words, not ways to pronounce this one.
+    if (!hasKanjiChar(term)) return [term];
+
+    const rows = this.db
+      .query<{ term: string }, [string]>(
+        // Only where the term is the *kanji* form: then every kana form of the
+        // entry is a way to read it.
+        `SELECT k.term FROM terms t
+           JOIN entries e ON e.id = t.entry_id
+           JOIN terms k ON k.entry_id = e.id AND k.kind = 'kana'
+         WHERE t.term = ? AND t.kind = 'kanji'
+         ORDER BY e.common DESC, COALESCE(e.freq_rank, 999999) ASC, k.rowid ASC
+         LIMIT 24`,
+      )
+      .all(term);
+
+    const readings: string[] = [];
+    for (const row of rows) if (!readings.includes(row.term)) readings.push(row.term);
+    return readings;
+  }
+
+  /**
    * Best entry for a word.
    *
    * Tries the dictionary form first (走る beats the noun 走り for a conjugated
