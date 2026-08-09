@@ -1,9 +1,9 @@
-import { useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api, type LibrarySong } from '../lib/api';
 import { useAsync } from '../lib/useAsync';
 import { useCommands, useRail } from '../lib/shell';
 import { StreakCard } from '../components/StreakCard';
-import { Art, Pips, duration, estimateMinutes } from '../components/bits';
+import { Art, Pips, cardsInMinutes, duration, estimateMinutes } from '../components/bits';
 import { Furigana } from '../components/Furigana';
 import type { ReviewOptions } from './Review';
 import type { SongMapRow, Stats, TroubleCluster } from '../../../shared/types';
@@ -16,6 +16,31 @@ import type { SongMapRow, Stats, TroubleCluster } from '../../../shared/types';
  * next unfinished section of the song you care most about. One button starts it,
  * so no decision is required before studying.
  */
+/** The stretches of time a session is offered in, in minutes. */
+const SESSION_LENGTHS = [5, 15, 30, 60] as const;
+
+const LENGTH_KEY = 'jp-ongaku:session-minutes';
+
+/**
+ * The session length, remembered between visits.
+ *
+ * Kept in localStorage rather than the database: it describes how much time this
+ * person has right now, not anything about their deck, and a stale value costs
+ * one click to fix.
+ */
+function useSessionLength(): [number, (minutes: number) => void] {
+  const [minutes, setMinutes] = useState<number>(() => {
+    const stored = Number(localStorage.getItem(LENGTH_KEY));
+    return SESSION_LENGTHS.includes(stored as (typeof SESSION_LENGTHS)[number]) ? stored : 15;
+  });
+
+  useEffect(() => {
+    localStorage.setItem(LENGTH_KEY, String(minutes));
+  }, [minutes]);
+
+  return [minutes, useCallback((next: number) => setMinutes(next), [])];
+}
+
 export function Today({
   onReview,
   onOpenSong,
@@ -33,7 +58,7 @@ export function Today({
   const trouble = useAsync(() => api.trouble(), []);
   const health = useAsync(() => api.health(), []);
   const [shuffled, setShuffled] = useState(false);
-  const [skipped, setSkipped] = useState(false);
+  const [budget, setBudget] = useSessionLength();
 
   const library = songs.data?.songs ?? [];
   const cells = useMemo(() => {
@@ -78,13 +103,31 @@ export function Today({
   const mixed = Math.max(0, (s?.dueNow ?? 0) - kana);
   const cluster = trouble.data?.clusters?.[0] ?? null;
 
-  const minutes = estimateMinutes((s?.dueNow ?? 0), nextSection?.lines ?? 0);
+  /**
+   * How long the set runs.
+   *
+   * The old headline promised however long the whole due pile would take — 71
+   * minutes on a bad week, which is not an offer anyone accepts. The user picks
+   * the stretch of time they have; the card budget follows from it, and the
+   * estimate is whichever is smaller, the time asked for or the work available.
+   */
+  const cardBudget = cardsInMinutes(budget);
+  const cards = Math.min(s?.dueNow ?? 0, cardBudget);
+  const minutes = Math.min(budget, estimateMinutes(cards, nextSection?.lines ?? 0));
+
+  const start = (title: string) => onReview({ title, limit: cardBudget });
 
   const rail = useRail(<StreakCard stats={s} />);
 
   useCommands([
-    { id: 'today-start', label: 'Start today’s setlist', where: 'Today', run: () => onReview({ title: 'Today’s setlist' }) },
+    { id: 'today-start', label: 'Start today’s setlist', where: 'Today', run: () => start('Today’s setlist') },
     { id: 'today-shuffle', label: 'Shuffle the setlist', where: 'Today', run: () => setShuffled((v) => !v) },
+    ...SESSION_LENGTHS.map((len) => ({
+      id: `today-length-${len}`,
+      label: `Set the session to ${len} minutes`,
+      where: 'Today',
+      run: () => setBudget(len),
+    })),
     { id: 'today-new-song', label: 'Add a song', where: 'Today', run: onNewSong },
   ]);
 
@@ -113,6 +156,19 @@ export function Today({
             <span className="cap">Today’s setlist</span>
             <span className="pill">≈ {minutes} MIN</span>
             {focus?.favourite && <span className="pill star">★ FAVOURITES FIRST</span>}
+          </div>
+
+          <div className="row length-picker">
+            <span className="cap">how long have you got</span>
+            {SESSION_LENGTHS.map((len) => (
+              <button
+                key={len}
+                className={`chip dark${budget === len ? ' on' : ''}`}
+                onClick={() => setBudget(len)}
+              >
+                {len} min
+              </button>
+            ))}
           </div>
           <h2>{headline(s?.dueNow ?? 0, nextSection !== null)}</h2>
 
@@ -172,26 +228,15 @@ export function Today({
         </div>
 
         <div className="go">
-          <button
-            className="start"
-            disabled={skipped}
-            onClick={() => onReview({ title: 'Today’s setlist' })}
-          >
-            <span className="disp">{skipped ? 'Skipped today' : 'Start the set'}</span>
-            <small>PRESS ⏎ · {minutes} MIN</small>
+          <button className="start" onClick={() => start('Today’s setlist')}>
+            <span className="disp">Start the set</span>
+            <small>
+              PRESS ⏎ · {cards} CARD{cards === 1 ? '' : 'S'} · {minutes} MIN
+            </small>
           </button>
-          <div className="row" style={{ gap: 8 }}>
-            <button className="forest" style={{ flex: 1 }} onClick={() => setShuffled((v) => !v)}>
-              {shuffled ? 'Shuffled' : 'Shuffle it'}
-            </button>
-            <button
-              className="forest quiet"
-              style={{ flex: 1 }}
-              onClick={() => setSkipped((v) => !v)}
-            >
-              {skipped ? 'Un-skip' : 'Skip today'}
-            </button>
-          </div>
+          <button className="forest" onClick={() => setShuffled((v) => !v)}>
+            {shuffled ? 'Shuffled' : 'Shuffle it'}
+          </button>
         </div>
       </div>
 
@@ -353,9 +398,9 @@ function ContinueRow({
   const known = map?.cells.filter((c) => c.mastery > 0).length ?? 0;
   return (
     <div className={`continue-row${lead ? '' : ' quiet'}`}>
-      <Art quiet={!lead} />
+      <Art quiet={!lead} youtubeId={song.youtubeId} seed={song.title} />
       <div className="who">
-        <div className="title">
+        <div className="title one-line" title={song.title}>
           {song.titleFurigana && song.titleFurigana.length > 0 ? (
             <Furigana segments={song.titleFurigana} />
           ) : (
@@ -363,7 +408,7 @@ function ContinueRow({
           )}
         </div>
         <div className="row" style={{ gap: 9 }}>
-          <span className="mono faint" style={{ fontSize: 12 }}>
+          <span className="mono faint one-line" style={{ fontSize: 12 }}>
             {song.titleRomaji ? `${song.titleRomaji} · ` : ''}
             {song.artist}
           </span>

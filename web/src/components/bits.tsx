@@ -101,14 +101,84 @@ export function Pips({
   );
 }
 
-/** Cover slot. Songs have no artwork locally, so this is an honest placeholder. */
-export function Art({ quiet = false, size }: { quiet?: boolean; size?: number }) {
+/** Background pairs a generated cover is drawn from, all inside the app's palette. */
+const COVER_TONES = [
+  { bg: 'var(--forest)', fg: 'var(--lime)' },
+  { bg: 'var(--lime)', fg: 'var(--ink)' },
+  { bg: 'var(--leaf)', fg: 'var(--white)' },
+  { bg: 'var(--mint)', fg: 'var(--forest)' },
+  { bg: 'var(--amber)', fg: 'var(--amber-ink)' },
+  { bg: 'var(--coral)', fg: 'var(--coral-ink)' },
+  { bg: 'var(--forest-3)', fg: 'var(--lime-pale)' },
+  { bg: 'var(--lime-pale)', fg: 'var(--forest)' },
+];
+
+/** Stable small integer for a string, so a song's cover never changes on reload. */
+function hash(text: string): number {
+  let h = 0;
+  for (let i = 0; i < text.length; i++) h = (h * 31 + text.charCodeAt(i)) | 0;
+  return Math.abs(h);
+}
+
+/**
+ * The glyph a generated cover carries: the song's first real character.
+ *
+ * A kanji or kana reads as a cover; a latin letter is uppercased so "back shot"
+ * gets a B rather than a lowercase b floating in the middle of a square.
+ */
+function coverGlyph(seed: string): string {
+  const char = [...seed.trim()].find((c) => /[^\s\p{P}\p{S}]/u.test(c));
+  return char ? char.toUpperCase() : '♪';
+}
+
+/**
+ * Cover art for a song.
+ *
+ * A video gives the real thing: YouTube's thumbnail, cropped square. Without one
+ * the cover is generated from the title — a palette tone and the song's first
+ * character — because the diagonal-hatch placeholder was identical for every
+ * song in the library and so told the user nothing about which row they were
+ * looking at.
+ */
+export function Art({
+  quiet = false,
+  size,
+  youtubeId,
+  seed,
+}: {
+  quiet?: boolean;
+  size?: number;
+  youtubeId?: string | null;
+  /** Usually the song title: what the generated cover is derived from. */
+  seed?: string | null;
+}) {
+  const box = size ? { width: size, height: size } : undefined;
+
+  if (youtubeId) {
+    return (
+      <div className={`art${quiet ? ' quiet' : ''} thumb`} style={box} aria-hidden>
+        <img src={`https://i.ytimg.com/vi/${youtubeId}/mqdefault.jpg`} alt="" loading="lazy" />
+      </div>
+    );
+  }
+
+  if (seed?.trim()) {
+    const tone = COVER_TONES[hash(seed) % COVER_TONES.length];
+    return (
+      <div
+        className={`art${quiet ? ' quiet' : ''} generated`}
+        style={{ ...box, background: tone.bg, color: tone.fg }}
+        aria-hidden
+      >
+        <span className="glyph" style={{ fontSize: (size ?? 76) * 0.46 }}>
+          {coverGlyph(seed)}
+        </span>
+      </div>
+    );
+  }
+
   return (
-    <div
-      className={`art${quiet ? ' quiet' : ''}`}
-      style={size ? { width: size, height: size } : undefined}
-      aria-hidden
-    >
+    <div className={`art${quiet ? ' quiet' : ''}`} style={box} aria-hidden>
       <span className="cap">ART</span>
     </div>
   );
@@ -148,7 +218,15 @@ export function duration(seconds: number): string {
   return `${Math.floor(mins / 60)}h ${mins % 60}m`;
 }
 
+/** Seconds a single card costs once you are warm. The unit both ways below. */
+export const SECONDS_PER_CARD = 8;
+
 /** Rough minutes a session will take: cards are ~8s each once you are warm. */
 export function estimateMinutes(cards: number, lines = 0): number {
-  return Math.max(1, Math.round((cards * 8 + lines * 22) / 60));
+  return Math.max(1, Math.round((cards * SECONDS_PER_CARD + lines * 22) / 60));
+}
+
+/** How many cards fit in a stretch of time — the inverse of estimateMinutes. */
+export function cardsInMinutes(minutes: number): number {
+  return Math.max(1, Math.round((minutes * 60) / SECONDS_PER_CARD));
 }

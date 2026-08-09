@@ -1,5 +1,5 @@
 import { getDb, nowIso } from '../db';
-import { schedule, LEECH_THRESHOLD, MATURE_DAYS, freshState } from './sm2';
+import { schedule, daysUntil, LEECH_THRESHOLD, MATURE_DAYS, freshState } from './sm2';
 import { lineFurigana } from '../lesson/build';
 import { lineRomaji, type AnalyzedToken } from '../nlp/tokenize';
 import type { FuriganaSegment } from '../../shared/types';
@@ -35,16 +35,21 @@ interface CardRow {
   mnemonic: string | null;
 }
 
-const SELECT_CARD = `
-  SELECT c.id, c.kind, c.song_id, c.line_id, c.word_id, c.grammar_id, c.front, c.back,
-         s.title AS song_title,
-         r.ease, r.interval_days, r.reps, r.lapses, r.due_at, r.leech, r.suspended,
-         m.text AS mnemonic
+const CARD_COLUMNS = `
+  c.id, c.kind, c.song_id, c.line_id, c.word_id, c.grammar_id, c.front, c.back,
+  s.title AS song_title,
+  r.ease, r.interval_days, r.reps, r.lapses, r.due_at, r.leech, r.suspended,
+  m.text AS mnemonic
+`;
+
+const CARD_FROM = `
   FROM cards c
   JOIN srs r ON r.card_id = c.id
   LEFT JOIN songs s ON s.id = c.song_id
   LEFT JOIN mnemonics m ON m.card_id = c.id
 `;
+
+const SELECT_CARD = `SELECT ${CARD_COLUMNS} ${CARD_FROM}`;
 
 function hydrate(row: CardRow): Card {
   const back = JSON.parse(row.back) as CardBack;
@@ -78,43 +83,118 @@ export interface QueueOptions {
 }
 
 /**
+ * A card scheduled further out than this is treated as settled: it has earned
+ * its rest, and padding a session with it teaches nothing. Below the mark the
+ * card is still being learned, so bringing it forward is fair game.
+ */
+const AHEAD_HORIZON_DAYS = 3;
+
+/**
  * Builds a review queue.
  *
- * Ordering puts leeches first (they are the reason the user is here), then the
- * most overdue, then new cards. Interleaving kinds matters for retention, so
- * cards of the same kind are spread out rather than grouped.
+ * Cards come in tiers, and a later tier is only reached once the ones before it
+ * are exhausted:
+ *
+ *   0. leeches — the cards the user keeps missing
+ *   1. genuinely due, most overdue first
+ *   2. cards never answered, in the order the lines are sung
+ *   3. only with `includeAhead`, cards pulled forward from the future
+ *
+ * The tiers exist because a song drill runs with `includeAhead` on, and a flat
+ * `due_at` ordering served its oldest-scheduled cards first — the ones answered
+ * correctly four times in a row — while the rest of the song sat behind them,
+ * unseen. New material now outranks anything already known, and a card whose
+ * next review is weeks out is only ever a last resort.
+ *
+ * Tier 3 also refuses anything already answered today, unless it is in relearning
+ * (interval under a day, so same-day repetition is the point) or a leech. Without
+ * that, two sessions back to back showed the same cards twice, which is the
+ * opposite of what the interval the user just earned means.
+ *
+ * Order inside a tier is shuffled, and deliberately so. Dueness is compared by
+ * the day rather than the second, because a finer comparison is a re-run of the
+ * order the cards were last answered in — and for a deck seeded in one go, like
+ * the katakana table, that is the order it was written in. Answering ギャ, ギュ,
+ * ギョ back to back is not recall; the second and third are guessed from the
+ * first. New cards keep their line order within a song, since learning a song
+ * out of sequence is worse than the shuffle is good.
  */
 export function queue(opts: QueueOptions = {}): Card[] {
   const db = getDb();
   const limit = Math.min(opts.limit ?? 20, 200);
   const now = nowIso();
+  const dayStart = startOfLocalDay(new Date()).toISOString();
 
   const where: string[] = ['r.suspended = 0'];
-  const params: (string | number)[] = [];
+  const params: Record<string, string | number> = { $now: now, $dayStart: dayStart };
 
-  if (!opts.includeAhead) {
-    where.push('r.due_at <= ?');
-    params.push(now);
-  }
+  if (!opts.includeAhead) where.push('r.due_at <= $now');
   if (opts.songId) {
-    where.push('c.song_id = ?');
-    params.push(opts.songId);
+    where.push('c.song_id = $songId');
+    params.$songId = opts.songId;
   }
   if (opts.kinds?.length) {
-    where.push(`c.kind IN (${opts.kinds.map(() => '?').join(', ')})`);
-    params.push(...opts.kinds);
+    const names = opts.kinds.map((_, i) => `$kind${i}`);
+    where.push(`c.kind IN (${names.join(', ')})`);
+    opts.kinds.forEach((kind, i) => {
+      params[`$kind${i}`] = kind;
+    });
   }
   if (opts.leechesOnly) where.push('r.leech = 1');
 
-  const rows = db
-    .query<CardRow, (string | number)[]>(
-      `${SELECT_CARD} WHERE ${where.join(' AND ')}
-       ORDER BY r.leech DESC, r.reps = 0 ASC, r.due_at ASC
-       LIMIT ?`,
-    )
-    .all(...params, limit * 2);
+  if (opts.includeAhead && !opts.leechesOnly) {
+    // Reviewed today and already settled: not this session's business.
+    where.push(`(
+      r.due_at <= $now
+      OR r.leech = 1
+      OR r.interval_days < 1
+      OR NOT EXISTS (SELECT 1 FROM reviews v WHERE v.card_id = c.id AND v.ts >= $dayStart)
+    )`);
+  }
 
-  return interleave(rows.map(hydrate)).slice(0, limit);
+  const rows = db
+    .query<CardRow & { tier: number; line_idx: number | null }, Record<string, string | number>>(
+      `SELECT ${CARD_COLUMNS},
+              l.idx AS line_idx,
+              CASE
+                WHEN r.leech = 1 THEN 0
+                WHEN r.due_at <= $now AND r.reps > 0 THEN 1
+                WHEN r.reps = 0 THEN 2
+                ELSE 3
+              END AS tier
+       ${CARD_FROM}
+       LEFT JOIN lines l ON l.id = c.line_id
+       WHERE ${where.join(' AND ')}
+       ORDER BY tier ASC,
+                CASE WHEN tier = 2 THEN COALESCE(l.idx, 0) ELSE 0 END ASC,
+                CASE WHEN tier = 2 THEN '' ELSE date(r.due_at) END ASC,
+                RANDOM()
+       LIMIT $limit`,
+    )
+    .all({ ...params, $limit: limit * 3 });
+
+  // Tier 3 is padding: reach for it only where the card is still being learned.
+  const near = rows.filter(
+    (row) => row.tier < 3 || daysUntil(row.due_at, new Date()) <= AHEAD_HORIZON_DAYS,
+  );
+  // A song whose every card is settled would otherwise return nothing at all.
+  // Falling back to the soonest-due of them keeps the drill usable, and the
+  // reviewed-today filter above still stops it repeating this morning's work.
+  const chosen = near.length > 0 ? near : rows;
+
+  const byTier = new Map<number, Card[]>();
+  for (const row of chosen) {
+    const list = byTier.get(row.tier) ?? [];
+    list.push(hydrate(row));
+    byTier.set(row.tier, list);
+  }
+  // Kinds are interleaved inside a tier, never across one: mixing tiers here
+  // would let a card pulled forward from next month outrank one due today.
+  const out: Card[] = [];
+  for (const tier of [...byTier.keys()].sort((a, b) => a - b)) {
+    out.push(...interleave(byTier.get(tier)!));
+  }
+  return out.slice(0, limit);
 }
 
 /**

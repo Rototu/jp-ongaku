@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import { getDb, getSetting, nowIso, setSetting } from '../db';
 import { dict } from '../dict';
 import * as lrclib from '../lyrics/lrclib';
+import * as youtube from '../lyrics/youtube';
 import { parseLrc, parsePlain, groupVerses } from '../lyrics/lrc';
 import { buildLesson } from '../lesson/build';
 import { seedKatakanaDeck, katakanaDeckSize } from '../lesson/kana-deck';
@@ -40,24 +41,13 @@ import type {
 
 export const api = new Hono();
 
-/** Extracts a YouTube video id from a raw id, a watch URL, or a youtu.be link. */
-export function parseYoutubeId(input: string | null | undefined): string | null {
-  if (!input) return null;
-  const trimmed = input.trim();
-  if (!trimmed) return null;
-  if (/^[\w-]{11}$/.test(trimmed)) return trimmed;
-  const patterns = [
-    /[?&]v=([\w-]{11})/,
-    /youtu\.be\/([\w-]{11})/,
-    /youtube\.com\/embed\/([\w-]{11})/,
-    /youtube\.com\/shorts\/([\w-]{11})/,
-  ];
-  for (const p of patterns) {
-    const m = p.exec(trimmed);
-    if (m) return m[1];
-  }
-  return null;
-}
+/**
+ * Extracts a YouTube video id from a raw id, a watch URL, or a youtu.be link.
+ *
+ * One implementation, in the YouTube client, so the field that accepts a pasted
+ * link and the field that accepts one later cannot disagree about what a link is.
+ */
+export const parseYoutubeId = youtube.videoIdFrom;
 
 /** m:ss for a millisecond length, for notices about a song's runtime. */
 function clockSec(ms: number): string {
@@ -78,30 +68,42 @@ api.get('/health', (c) => {
 
 // --- lyrics search & import -------------------------------------------------
 
+/**
+ * Adds ruby and romaji to search results.
+ *
+ * A list of bare-kanji titles is unreadable for someone who does not read kanji,
+ * which is the whole audience — so this happens before they have to choose.
+ */
+async function annotateHits(hits: lrclib.LrclibHit[]) {
+  return Promise.all(
+    hits.map(async (hit) => {
+      const [title, artistName] = await Promise.all([
+        annotate(hit.trackName),
+        annotate(hit.artistName),
+      ]);
+      return {
+        ...hit,
+        titleFurigana: title?.furigana ?? null,
+        titleRomaji: title?.romaji ?? null,
+        artistFurigana: artistName?.furigana ?? null,
+        artistRomaji: artistName?.romaji ?? null,
+      };
+    }),
+  );
+}
+
 api.get('/search', async (c) => {
   const q = c.req.query('q')?.trim();
   const artist = c.req.query('artist')?.trim();
+  const duration = Number(c.req.query('duration'));
   if (!q) return c.json({ error: 'q is required' }, 400);
   try {
-    const hits = await lrclib.search(q, artist || undefined);
-    // Annotate before the user has to choose: a list of bare-kanji titles is
-    // unreadable for someone who doesn't read kanji.
-    const annotated = await Promise.all(
-      hits.map(async (hit) => {
-        const [title, artistName] = await Promise.all([
-          annotate(hit.trackName),
-          annotate(hit.artistName),
-        ]);
-        return {
-          ...hit,
-          titleFurigana: title?.furigana ?? null,
-          titleRomaji: title?.romaji ?? null,
-          artistFurigana: artistName?.furigana ?? null,
-          artistRomaji: artistName?.romaji ?? null,
-        };
-      }),
+    const hits = await lrclib.search(
+      q,
+      artist || undefined,
+      Number.isFinite(duration) && duration > 0 ? duration : null,
     );
-    return c.json({ hits: annotated });
+    return c.json({ hits: await annotateHits(hits) });
   } catch (err) {
     return c.json(
       {
@@ -110,6 +112,53 @@ api.get('/search', async (c) => {
       },
       502,
     );
+  }
+});
+
+/**
+ * A YouTube link, turned into a song to import.
+ *
+ * The user pastes what they are listening to. The video's own title and channel
+ * name give the song and the performer, the watch page gives its length, and the
+ * lyric candidates come back ranked against that length — so the full song sorts
+ * above the TV-size edit without the user having to know which is which.
+ */
+api.get('/youtube/resolve', async (c) => {
+  const url = c.req.query('url')?.trim();
+  if (!url) return c.json({ error: 'url is required' }, 400);
+
+  let video: youtube.YoutubeMeta;
+  try {
+    video = await youtube.resolve(url);
+  } catch (err) {
+    const status = err instanceof youtube.NotAVideo ? 400 : 502;
+    return c.json(
+      { error: err instanceof Error ? err.message : 'Could not read that video' },
+      status,
+    );
+  }
+
+  try {
+    // Widen the query only as far as needed: stop at the first candidate that
+    // returns Japanese lyrics, since anything else is unusable for studying.
+    let hits: lrclib.LrclibHit[] = [];
+    for (const candidate of youtube.searchCandidates(video)) {
+      const found = await lrclib.search(candidate.q, candidate.artist, video.durationSec);
+      if (found.some((h) => h.japanese)) {
+        hits = found;
+        break;
+      }
+      if (hits.length === 0) hits = found;
+    }
+    return c.json({ video, hits: await annotateHits(hits) });
+  } catch (err) {
+    // The video resolved; only the lyric search failed. Hand back what we have
+    // so the user can search by hand instead of starting over.
+    return c.json({
+      video,
+      hits: [],
+      error: `Lyrics search unavailable: ${err instanceof Error ? err.message : 'unknown error'}`,
+    });
   }
 });
 

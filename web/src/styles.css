@@ -706,6 +706,14 @@ h3 {
   color: var(--faint);
 }
 
+/* One line, ellipsis past the edge. Pair with a title attribute for the rest. */
+.one-line {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
 .error {
   background: var(--coral-pale);
   border: 2px solid var(--coral);
@@ -885,6 +893,35 @@ button.dark .kbd {
 .art .cap {
   font-size: 8px;
   letter-spacing: 0.06em;
+}
+
+/* A video's thumbnail, cropped square. */
+.art.thumb {
+  padding: 0;
+  background: var(--canvas);
+}
+
+.art.thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+/* No video: a tone and the title's first character, so covers differ. */
+.art.generated {
+  padding: 0;
+  align-items: center;
+  font-family: var(--jp);
+}
+
+.art.generated .glyph {
+  font-weight: 800;
+  line-height: 1;
+}
+
+.art.generated.quiet {
+  opacity: 0.62;
 }
 
 /* section pips: one bar per verse, darker = better known */
@@ -1274,7 +1311,8 @@ rt {
 
 .continue-row .who {
   flex: 1;
-  min-width: 180px;
+  min-width: 0;
+  flex-basis: 180px;
 }
 
 .continue-row .title {
@@ -1282,6 +1320,9 @@ rt {
   font-size: 22px;
   font-weight: 700;
   line-height: 1.85;
+  /* Room for furigana above the line box, which .one-line would otherwise clip. */
+  padding-top: 5px;
+  margin-top: -5px;
 }
 
 .seed-banner {
@@ -1552,6 +1593,36 @@ rt {
   color: var(--coral-text);
 }
 
+/* Chips on a dark panel: the setlist's session-length row. */
+.chip.dark {
+  background: var(--forest-2);
+  border-color: var(--forest-3);
+  color: var(--sage);
+}
+
+.chip.dark:hover:not(:disabled) {
+  background: var(--forest-2);
+  border-color: var(--lime);
+  color: var(--lime);
+}
+
+.chip.dark.on {
+  background: var(--lime);
+  border-color: var(--lime);
+  color: var(--ink);
+}
+
+.length-picker {
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 4px;
+}
+
+.length-picker .cap {
+  color: var(--sage);
+  margin-right: 2px;
+}
+
 .rail-card .chip {
   background: var(--forest);
   border-color: var(--forest);
@@ -1611,6 +1682,31 @@ rt {
   gap: 10px;
   flex-wrap: wrap;
   margin-bottom: 6px;
+}
+
+/* What a pasted YouTube link turned out to be. */
+.from-video {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  background: var(--lime-pale);
+  border: 1.5px solid var(--ink);
+  border-radius: var(--radius-sm);
+  padding: 10px 14px;
+}
+
+.from-video .shot {
+  width: 84px;
+  height: 48px;
+  object-fit: cover;
+  border-radius: 8px;
+  border: 1.5px solid var(--ink);
+  flex-shrink: 0;
+}
+
+.from-video .who {
+  flex: 1;
+  min-width: 0;
 }
 
 .hit .art {
@@ -1682,6 +1778,10 @@ rt {
   font-size: 21px;
   font-weight: 700;
   line-height: 1.8;
+  /* Furigana rides above the line box, so clipping for the ellipsis would
+     shave its top off. Pad, then pull the padding back out of the layout. */
+  padding-top: 5px;
+  margin-top: -5px;
 }
 
 .song-card .foot {

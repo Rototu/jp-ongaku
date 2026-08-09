@@ -11,6 +11,8 @@ import {
   realignWordReadings,
 } from './lesson/backfill-cards';
 import { pruneMismatchedGrammarCards } from './lesson/regrade-grammar';
+import { rescopeGrammarCards } from './lesson/rescope-grammar';
+import { refreshLessons } from './lesson/refresh';
 import { dict } from './dict';
 import { status as llmStatus } from './llm/provider';
 import { DATA_DIR, DIST_DIR, ensureDirs } from './paths';
@@ -51,6 +53,26 @@ try {
   console.error('[cards] reading backfill failed:', err);
 }
 
+// Grammar cards keyed by pattern alone showed whichever song was imported last,
+// so a per-song session served lines from other songs. Rescope them first: the
+// prune below then judges examples that belong to the card's own song.
+try {
+  const scoped = rescopeGrammarCards();
+  if (scoped.rekeyed > 0) {
+    console.log(
+      `  scoped ${scoped.rekeyed} grammar card${scoped.rekeyed === 1 ? '' : 's'} to their song` +
+        (scoped.repaired > 0 ? `, ${scoped.repaired} with the wrong example line` : ''),
+    );
+  }
+  if (scoped.created > 0) {
+    console.log(
+      `  added ${scoped.created} grammar card${scoped.created === 1 ? '' : 's'} the shared key had hidden`,
+    );
+  }
+} catch (err) {
+  console.error('[cards] grammar rescope failed:', err);
+}
+
 // Grammar cards that ask about a form their example line does not contain are
 // unanswerable; drop them rather than leave them in the rotation.
 try {
@@ -63,6 +85,21 @@ try {
 } catch (err) {
   console.error('[cards] grammar prune failed:', err);
 }
+
+// Songs imported before the current builder — wrong dictionary entry for a
+// kana-written verb, a negative form glossed as its positive — are rebuilt from
+// their stored lyrics. Gated on a generation marker, so this is a one-off per
+// change, and backgrounded because it re-tokenises every line.
+void refreshLessons()
+  .then((res) => {
+    if (!res || res.songs === 0) return;
+    console.log(
+      `  rebuilt ${res.songs} lesson${res.songs === 1 ? '' : 's'} against the current builder` +
+        (res.cardsPruned > 0 ? `, dropping ${res.cardsPruned} stale card${res.cardsPruned === 1 ? '' : 's'}` : '') +
+        (res.cardsCreated > 0 ? `, adding ${res.cardsCreated}` : ''),
+    );
+  })
+  .catch((err) => console.error('[lessons] refresh failed:', err));
 
 const app = new Hono();
 

@@ -24,9 +24,15 @@ function toHash(view: View): string {
     case 'song':
       return `#/song/${view.songId}`;
     case 'review':
+      // The card budget belongs in the hash with everything else: navigating sets
+      // the hash, the hashchange listener parses it straight back, and anything
+      // left out of the URL is dropped a tick after the session starts — which is
+      // how a 5-minute set used to reopen itself as the default 30 cards.
       return `#/review${view.options.songId ? `/song/${view.options.songId}` : ''}${
         view.options.leeches ? '/leeches' : ''
-      }${view.options.kinds?.length ? `/kinds/${view.options.kinds.join(',')}` : ''}`;
+      }${view.options.kinds?.length ? `/kinds/${view.options.kinds.join(',')}` : ''}${
+        view.options.limit ? `/limit/${view.options.limit}` : ''
+      }`;
     case 'library':
       return '#/songs';
     case 'progress':
@@ -48,6 +54,9 @@ function fromHash(hash: string): View {
       else if (parts[i] === 'leeches') options.leeches = true;
       else if (parts[i] === 'kinds' && parts[i + 1]) {
         options.kinds = parts[++i].split(',') as ReviewOptions['kinds'];
+      } else if (parts[i] === 'limit' && parts[i + 1]) {
+        const limit = Number(parts[++i]);
+        if (Number.isFinite(limit) && limit > 0) options.limit = Math.min(limit, 200);
       }
     }
     return { name: 'review', options };
