@@ -28,7 +28,12 @@ export interface ReviewOptions {
   kinds?: CardKind[];
   leeches?: boolean;
   title?: string;
+  /** How many cards the session may serve. Today derives it from the time asked for. */
+  limit?: number;
 }
+
+/** Cards a session asks for when the caller has no opinion — about four minutes. */
+const DEFAULT_LIMIT = 30;
 
 const REASONS: { key: CardReasonKind; label: string }[] = [
   { key: 'looks-like-another', label: 'Looks like another word' },
@@ -61,13 +66,17 @@ export function Review({
   const [reason, setReason] = useState<CardReasonKind | null>(null);
   const [player, setPlayer] = useState<PlayerHandle | null>(null);
   const shownAt = useRef<number>(Date.now());
+  // Set while a grade or a retire is in flight. Both advance the position when
+  // they land, so letting a second one start would grade one card twice and step
+  // past the next card without ever showing it.
+  const busy = useRef(false);
 
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
       const res = await api.queue({
-        limit: 30,
+        limit: options.limit ?? DEFAULT_LIMIT,
         songId: options.songId,
         kinds: options.kinds,
         leeches: options.leeches,
@@ -86,7 +95,7 @@ export function Review({
     } finally {
       setLoading(false);
     }
-  }, [options.songId, options.leeches, JSON.stringify(options.kinds ?? [])]);
+  }, [options.songId, options.leeches, options.limit, JSON.stringify(options.kinds ?? [])]);
 
   useEffect(() => {
     void load();
@@ -108,9 +117,21 @@ export function Review({
     }
   }, [card?.id, card?.kind, player]);
 
+  /**
+   * Moves to the next card. Every per-card piece of state resets here — a card
+   * arriving with the previous one's `revealed` still set would show its answer
+   * and the grade buttons before the user had a chance to think.
+   */
+  const advance = useCallback(() => {
+    setRevealed(false);
+    setChosen(null);
+    setPos((p) => p + 1);
+  }, []);
+
   const grade = useCallback(
     async (quality: number, given?: string) => {
-      if (!card) return;
+      if (!card || busy.current) return;
+      busy.current = true;
       const ms = Date.now() - shownAt.current;
       setAnswered((prev) => ({
         correct: prev.correct + (quality >= 3 ? 1 : 0),
@@ -122,13 +143,13 @@ export function Review({
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Could not save that answer');
         return;
+      } finally {
+        busy.current = false;
       }
       onChanged?.();
-      setRevealed(false);
-      setChosen(null);
-      setPos((p) => p + 1);
+      advance();
     },
-    [card, onChanged],
+    [card, onChanged, advance],
   );
 
   const playClip = useCallback(() => {
@@ -181,6 +202,20 @@ export function Review({
     () => (card && session ? (session.cloze[card.id] ?? []) : []),
     [card, session],
   );
+
+  /**
+   * Meanings worth printing under the answer.
+   *
+   * A vocab card's answer already *is* its glosses joined together, so repeating
+   * them is noise. A cloze card's answer is Japanese, so its meanings are the
+   * only translation on the card — and dropping them when there is just one, as
+   * this used to, left cards like 聞いて with no meaning shown at all.
+   */
+  const extraGlosses = useMemo(() => {
+    const glosses = card?.back.glosses ?? [];
+    const answer = card?.back.answer ?? '';
+    return glosses.filter((g) => !answer.includes(g));
+  }, [card]);
 
   if (loading) return <p className="muted">Shuffling cards…</p>;
 
@@ -349,9 +384,9 @@ export function Review({
                       ) : null}
                     </div>
                   )}
-                  {card.back.glosses && card.back.glosses.length > 1 && (
+                  {extraGlosses.length > 0 && (
                     <div className="glosses">
-                      <RubyText text={card.back.glosses.join(' · ')} />
+                      <RubyText text={extraGlosses.join(' · ')} />
                     </div>
                   )}
                   {card.back.note && (
@@ -468,8 +503,18 @@ export function Review({
               <button
                 className="ghost small"
                 onClick={async () => {
-                  await api.suspend(card.id, true);
-                  setPos((p) => p + 1);
+                  if (busy.current) return;
+                  busy.current = true;
+                  try {
+                    await api.suspend(card.id, true);
+                  } catch (err) {
+                    setError(err instanceof Error ? err.message : 'Could not retire that card');
+                    return;
+                  } finally {
+                    busy.current = false;
+                  }
+                  onChanged?.();
+                  advance();
                 }}
               >
                 Retire this card

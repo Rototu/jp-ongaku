@@ -213,6 +213,18 @@ function toHit(r: LrclibRecord, duplicates = 0): LrclibHit {
 }
 
 /**
+ * The length a hit describes, in seconds: its timings where it has them.
+ *
+ * Used to compare a candidate against the recording the user is importing. The
+ * timings are preferred over the stated duration for the same reason the rest of
+ * this file prefers them — they are what playback is matched against.
+ */
+function effectiveLengthSec(hit: LrclibHit): number | null {
+  if (hit.lyricSpanSec !== null) return hit.lyricSpanSec;
+  return hit.duration;
+}
+
+/**
  * Collapses records that carry the same lyrics and ranks what is left.
  *
  * LRCLIB is crowdsourced, so one song arrives as several entries with identical
@@ -220,8 +232,14 @@ function toHit(r: LrclibRecord, duplicates = 0): LrclibHit {
  * to the full-length lyrics. Offering all of them invites picking the one whose
  * stated length is wrong, so identical lyrics are shown once, represented by the
  * record whose own duration agrees with its timings.
+ *
+ * `targetDurationSec` is the length of the video the user is importing against,
+ * when one is known. It only ever breaks ties below Japanese-script and
+ * synced-lyrics, which remain the things that decide whether an entry is usable
+ * at all — but among usable entries it is the difference between the full song
+ * and a TV-size edit.
  */
-export function rankHits(records: LrclibRecord[]): LrclibHit[] {
+export function rankHits(records: LrclibRecord[], targetDurationSec?: number | null): LrclibHit[] {
   const groups = new Map<string, LrclibRecord[]>();
   for (const r of records) {
     if (r.instrumental) continue;
@@ -239,6 +257,18 @@ export function rankHits(records: LrclibRecord[]): LrclibHit[] {
     .sort((a, b) => {
       if (a.japanese !== b.japanese) return a.japanese ? -1 : 1;
       if (a.hasSynced !== b.hasSynced) return a.hasSynced ? -1 : 1;
+      if (targetDurationSec) {
+        const aLen = effectiveLengthSec(a);
+        const bLen = effectiveLengthSec(b);
+        // A hit with no length at all sorts after ones that can be compared.
+        if ((aLen === null) !== (bLen === null)) return aLen === null ? 1 : -1;
+        if (aLen !== null && bLen !== null) {
+          const gap = Math.abs(aLen - targetDurationSec) - Math.abs(bLen - targetDurationSec);
+          // Five seconds of slack: entries within it are the same cut, and their
+          // line counts and start times are the more useful tie-break.
+          if (Math.abs(gap) > 5) return gap;
+        }
+      }
       return 0;
     })
     .slice(0, 20);
@@ -248,7 +278,11 @@ export function rankHits(records: LrclibRecord[]): LrclibHit[] {
  * Searches LRCLIB, ranking Japanese-script results with synced lyrics first —
  * an English romaji transcription of an anime OP is useless for studying kanji.
  */
-export async function search(query: string, artist?: string): Promise<LrclibHit[]> {
+export async function search(
+  query: string,
+  artist?: string,
+  targetDurationSec?: number | null,
+): Promise<LrclibHit[]> {
   const params = new URLSearchParams();
   if (artist) {
     params.set('track_name', query);
@@ -265,7 +299,18 @@ export async function search(query: string, artist?: string): Promise<LrclibHit[
     throw err;
   }
 
-  return rankHits(records);
+  // An artist-scoped search that finds nothing is common: LRCLIB matches the
+  // artist field literally, and a channel name is not always what the uploader
+  // filed the song under. Fall back to the title alone rather than dead-ending.
+  if (records.length === 0 && artist) {
+    try {
+      records = await get<LrclibRecord[]>(`/search?q=${encodeURIComponent(query)}`);
+    } catch (err) {
+      if (!(err instanceof NotFound)) throw err;
+    }
+  }
+
+  return rankHits(records, targetDurationSec);
 }
 
 export interface FetchedLyrics {

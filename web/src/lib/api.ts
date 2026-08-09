@@ -80,6 +80,19 @@ export interface SearchHit {
   artistRomaji: string | null;
 }
 
+/** What a pasted YouTube link told us about the song it plays. */
+export interface YoutubeMeta {
+  videoId: string;
+  rawTitle: string;
+  channel: string;
+  durationSec: number | null;
+  thumbnailUrl: string | null;
+  title: string;
+  artist: string;
+  /** How the title was split, so the UI can admit when it guessed. */
+  guessedBy: 'brackets' | 'separator' | 'channel' | 'ai';
+}
+
 export interface LibrarySong extends Song {
   dueCards: number;
   totalCards: number;
@@ -190,9 +203,16 @@ export interface KanjiInfo {
 export const api = {
   health: () => request<Health>('/health'),
 
-  search: (q: string, artist?: string) =>
+  search: (q: string, artist?: string, durationSec?: number | null) =>
     request<{ hits: SearchHit[]; error?: string }>(
-      `/search?q=${encodeURIComponent(q)}${artist ? `&artist=${encodeURIComponent(artist)}` : ''}`,
+      `/search?q=${encodeURIComponent(q)}${artist ? `&artist=${encodeURIComponent(artist)}` : ''}` +
+        `${durationSec ? `&duration=${Math.round(durationSec)}` : ''}`,
+    ),
+
+  /** Reads a YouTube link and returns lyric candidates ranked against its length. */
+  resolveYoutube: (url: string) =>
+    request<{ video: YoutubeMeta; hits: SearchHit[]; error?: string }>(
+      `/youtube/resolve?url=${encodeURIComponent(url)}`,
     ),
 
   importFromLrclib: (lrclibId: number, youtubeId?: string, context?: string) =>

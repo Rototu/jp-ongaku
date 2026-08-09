@@ -142,6 +142,9 @@ export async function tokenizeLine(text: string): Promise<AnalyzedToken[]> {
             // Reading of the dictionary form: the head's reading with its
             // inflected tail swapped back (走り/はしり -> 走る/はしる).
             baseReading: baseReadingGuess(head, headReading, baseForm),
+            // Word class, so a kana-written verb cannot resolve to a noun that
+            // happens to share its reading (きいて -> 聞く, never 菊).
+            pos: head.pos,
           });
 
     const fw = functionWordGloss(head.surface_form, head.pos);

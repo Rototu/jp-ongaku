@@ -103,7 +103,10 @@ export interface AiChunk {
 }
 
 export interface GrammarNote {
-  /** Stable key so the same pattern across songs maps to one card. */
+  /**
+   * Stable key for the pattern. Cards are keyed by song *and* this, since the
+   * card's example is one of that song's lines.
+   */
   key: string;
   pattern: string;
   explanation: string;

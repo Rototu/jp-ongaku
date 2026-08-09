@@ -3,6 +3,8 @@ import { Database } from 'bun:sqlite';
 import { _setDbForTests, getDb } from '../server/db';
 import { buildLesson } from '../server/lesson/build';
 import { pruneMismatchedGrammarCards } from '../server/lesson/regrade-grammar';
+import { rescopeGrammarCards } from '../server/lesson/rescope-grammar';
+import { queue } from '../server/srs/store';
 import { PATTERNS, markerPresent } from '../server/nlp/grammar';
 import { tokenizeLine } from '../server/nlp/tokenize';
 import { parsePlain } from '../server/lyrics/lrc';
@@ -192,5 +194,105 @@ describe('generated grammar cards', () => {
     const vocabAfter =
       db.query<{ n: number }, []>("SELECT COUNT(*) AS n FROM cards WHERE kind = 'vocab'").get()?.n ?? 0;
     expect(vocabAfter).toBe(vocabBefore);
+  });
+});
+
+describe('grammar cards are scoped to their song', () => {
+  beforeEach(() => {
+    _setDbForTests(new Database(':memory:'));
+  });
+
+  afterEach(() => {
+    _setDbForTests(null);
+  });
+
+  // Both songs use 〜たら, so the shared pattern key is what used to collide.
+  const SONG_A = ['走れたら聞いて', '続ければ届くだろう'].join('\n');
+  const SONG_B = ['泣けたら楽になる'].join('\n');
+
+  function importSong(title: string, raw: string) {
+    return buildLesson({ title, artist: 'Test Artist', source: 'paste', lines: parsePlain(raw), raw });
+  }
+
+  test('each song gets its own card for a shared pattern, showing its own line', async () => {
+    const a = await importSong('Song A', SONG_A);
+    const b = await importSong('Song B', SONG_B);
+
+    const cards = getDb()
+      .query<{ song_id: number; dedupe_key: string; front: string }, [string]>(
+        `SELECT c.song_id, c.dedupe_key, c.front FROM cards c
+         JOIN grammar_items g ON g.id = c.grammar_id
+         WHERE c.kind = 'grammar' AND g.key = ?`,
+      )
+      .all('conditional-tara');
+
+    expect(cards.map((c) => c.song_id).sort()).toEqual([a.songId, b.songId].sort());
+    for (const card of cards) {
+      const front = JSON.parse(card.front) as CardFront;
+      const expected = card.song_id === a.songId ? '走れたら聞いて' : '泣けたら楽になる';
+      expect(front.jp).toBe(expected);
+      expect(card.dedupe_key).toBe(`grammar:${card.song_id}:conditional-tara`);
+    }
+  });
+
+  test('a per-song queue never serves another song\'s line', async () => {
+    const a = await importSong('Song A', SONG_A);
+    await importSong('Song B', SONG_B);
+
+    const cards = queue({ songId: a.songId, limit: 50, includeAhead: true });
+    expect(cards.length).toBeGreaterThan(0);
+    for (const card of cards) {
+      expect(card.songId).toBe(a.songId);
+      if (card.kind === 'grammar') expect(card.front.jp).not.toBe('泣けたら楽になる');
+    }
+  });
+
+  test('the rescope repairs a card left over from the shared-key era', async () => {
+    const a = await importSong('Song A', SONG_A);
+    const b = await importSong('Song B', SONG_B);
+    const db = getDb();
+
+    // Recreate the old state: one globally-keyed card owned by song A, whose
+    // example was overwritten by song B's import.
+    const aCard = db
+      .query<{ id: number; line_id: number }, [number]>(
+        `SELECT c.id, c.line_id FROM cards c JOIN grammar_items g ON g.id = c.grammar_id
+         WHERE c.kind = 'grammar' AND g.key = 'conditional-tara' AND c.song_id = ?`,
+      )
+      .get(a.songId)!;
+    db.prepare("DELETE FROM cards WHERE kind = 'grammar' AND song_id = ? AND dedupe_key LIKE '%conditional-tara'").run(
+      b.songId,
+    );
+    db.prepare('UPDATE cards SET dedupe_key = ?, front = ? WHERE id = ?').run(
+      'grammar:conditional-tara',
+      JSON.stringify({ prompt: 'What does 〜たら do?', jp: '泣けたら楽になる' }),
+      aCard.id,
+    );
+
+    const result = rescopeGrammarCards();
+    expect(result.rekeyed).toBeGreaterThan(0);
+    expect(result.repaired).toBe(1);
+    expect(result.created).toBe(1);
+
+    // Song A's card keeps its id — and therefore its review history — while its
+    // example goes back to song A's line.
+    const fixed = db
+      .query<{ song_id: number; dedupe_key: string; front: string }, [number]>(
+        'SELECT song_id, dedupe_key, front FROM cards WHERE id = ?',
+      )
+      .get(aCard.id)!;
+    expect(fixed.song_id).toBe(a.songId);
+    expect(fixed.dedupe_key).toBe(`grammar:${a.songId}:conditional-tara`);
+    expect((JSON.parse(fixed.front) as CardFront).jp).toBe('走れたら聞いて');
+    expect((JSON.parse(fixed.front) as CardFront).furigana?.length).toBeGreaterThan(0);
+
+    // Song B gets the card the shared key had denied it.
+    const bCard = db
+      .query<{ front: string }, [string]>('SELECT front FROM cards WHERE dedupe_key = ?')
+      .get(`grammar:${b.songId}:conditional-tara`)!;
+    expect((JSON.parse(bCard.front) as CardFront).jp).toBe('泣けたら楽になる');
+
+    // Idempotent: a second run has nothing left to do.
+    expect(rescopeGrammarCards()).toEqual({ rekeyed: 0, repaired: 0, created: 0 });
   });
 });

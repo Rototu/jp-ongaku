@@ -3,6 +3,7 @@ import type { AnalyzedToken } from '../nlp/tokenize';
 import { tokenizeLine, lineRomaji, lineKana } from '../nlp/tokenize';
 import { shouldEnroll } from '../nlp/priority';
 import { isLoanword, toRomaji } from '../nlp/kana';
+import { glossesFor, isNegated } from '../nlp/polarity';
 import { alignFurigana } from '../nlp/furigana';
 import { getDb, nowIso } from '../db';
 import { freshState } from '../srs/sm2';
@@ -42,6 +43,8 @@ export interface BuildResult {
   wordsSongOnly: number;
   grammarPoints: number;
   cardsCreated: number;
+  /** Cards this pass found the song no longer has any use for. */
+  cardsPruned: number;
 }
 
 /** Max cloze cards per line — more than this and one song floods the queue. */
@@ -74,6 +77,26 @@ export function lineFurigana(
   return out;
 }
 
+/**
+ * The line under a card's answer explaining the form the lyrics used.
+ *
+ * Two things belong here, and both are about the gap between the dictionary and
+ * the song: the surface the word wore on the line, and — when the surface is
+ * negative — the fact that its meaning is flipped. Without the second, a learner
+ * reading 見えない below "to be seen" has been told the opposite of the lyric.
+ */
+function noteForSurface(token: AnalyzedToken, headword?: string): string | undefined {
+  const parts: string[] = [];
+  if (headword && token.surface !== headword) {
+    parts.push(`Seen in the song as ${token.surface} (${token.romaji})`);
+  }
+  if (isNegated(token)) {
+    const lemma = token.entry?.headword ?? token.baseForm;
+    parts.push(`Negative form of ${lemma} — the 〜ない tail flips the meaning`);
+  }
+  return parts.length > 0 ? parts.join('. ') : undefined;
+}
+
 export async function buildLesson(input: BuildInput): Promise<BuildResult> {
   const db = getDb();
   const now = nowIso();
@@ -100,6 +123,7 @@ export async function buildLesson(input: BuildInput): Promise<BuildResult> {
     wordsSongOnly: 0,
     grammarPoints: 0,
     cardsCreated: 0,
+    cardsPruned: 0,
   };
 
   db.transaction(() => {
@@ -191,7 +215,20 @@ export async function buildLesson(input: BuildInput): Promise<BuildResult> {
       ).run(songId, verse, now);
     }
 
-    stats = materialize(db, songId, lineIds, tokenized, input, now);
+    const built = materialize(db, songId, lineIds, tokenized, input, now);
+    // Only an existing song can have leftovers, and only its own rows are
+    // considered — a first import has nothing to prune.
+    const pruned = existing
+      ? pruneStale(db, songId, built)
+      : { cardsPruned: 0, linksPruned: 0 };
+
+    stats = {
+      wordsEnrolled: built.wordsEnrolled,
+      wordsSongOnly: built.wordsSongOnly,
+      grammarPoints: built.grammarPoints,
+      cardsCreated: built.cardsCreated,
+      cardsPruned: pruned.cardsPruned,
+    };
   })();
 
   return {
@@ -200,6 +237,77 @@ export async function buildLesson(input: BuildInput): Promise<BuildResult> {
     verseCount: new Set(verses).size,
     ...stats,
   };
+}
+
+/**
+ * Rebuilds a song's lesson from the lyrics already stored for it.
+ *
+ * The same path as an import, minus the network: lines come from the database, so
+ * a fix to tokenising, the dictionary or a card's wording reaches songs the user
+ * imported before the fix existed. Card ids and SRS state survive, since every
+ * write is the same upsert an import uses.
+ */
+export async function rebuildLesson(songId: number): Promise<BuildResult | null> {
+  const db = getDb();
+  const song = db
+    .query<
+      {
+        id: number;
+        title: string;
+        artist: string;
+        album: string | null;
+        source: string;
+        lrclib_id: number | null;
+        duration_ms: number | null;
+        youtube_id: string | null;
+        context: string | null;
+      },
+      [number]
+    >(
+      `SELECT id, title, artist, album, source, lrclib_id, duration_ms, youtube_id, context
+       FROM songs WHERE id = ?`,
+    )
+    .get(songId);
+  if (!song) return null;
+
+  const lines = db
+    .query<{ text: string; time_ms: number | null; verse_idx: number }, [number]>(
+      'SELECT text, time_ms, verse_idx FROM lines WHERE song_id = ? ORDER BY idx ASC',
+    )
+    .all(songId);
+  if (lines.length === 0) return null;
+
+  // Verses are regrouped from the stored verse indices rather than from blank
+  // lines: the raw lyrics are not kept, and the recorded grouping is the one the
+  // user has been studying against.
+  const raw = rawFromVerses(lines);
+
+  return buildLesson({
+    title: song.title,
+    artist: song.artist,
+    album: song.album,
+    source: song.source === 'lrclib' ? 'lrclib' : 'paste',
+    lrclibId: song.lrclib_id,
+    durationMs: song.duration_ms,
+    youtubeId: song.youtube_id,
+    context: song.context,
+    lines: lines.map((l) => ({ text: l.text, timeMs: l.time_ms })),
+    raw,
+  });
+}
+
+/** Reconstructs the blank-line layout that produced a set of verse indices. */
+function rawFromVerses(lines: { text: string; verse_idx: number }[]): string {
+  const out: string[] = [];
+  let current = lines[0]?.verse_idx ?? 0;
+  for (const line of lines) {
+    if (line.verse_idx !== current) {
+      out.push('');
+      current = line.verse_idx;
+    }
+    out.push(line.text);
+  }
+  return out.join('\n');
 }
 
 function materialize(
@@ -214,6 +322,12 @@ function materialize(
   let wordsSongOnly = 0;
   let grammarPoints = 0;
   let cardsCreated = 0;
+  // Every dedupe key and word link this pass produced. A rebuild uses them to
+  // spot what the song no longer has any use for — a vocab card for 菊
+  // "chrysanthemum", built when きいて resolved to the wrong entry, otherwise
+  // keeps coming up forever.
+  const keys = new Set<string>();
+  const wordLinks = new Set<string>();
 
   const upsertWord = db.prepare(
     `INSERT INTO words (lemma, reading, romaji, furigana, glosses, pos, jlpt, common, priority, loanword, created_at)
@@ -237,9 +351,18 @@ function materialize(
   );
 
   const insCard = db.prepare(
+    // The links are refreshed on conflict as well as the faces. A rebuild can
+    // resolve a word differently — きいて used to land on 菊 and now lands on
+    // 聞く — and a card left pointing at the old word row would be deleted with
+    // it while its key was still in use.
     `INSERT INTO cards (kind, song_id, line_id, word_id, grammar_id, dedupe_key, front, back, created_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-     ON CONFLICT (dedupe_key) DO UPDATE SET front = excluded.front, back = excluded.back
+     ON CONFLICT (dedupe_key) DO UPDATE SET
+       front      = excluded.front,
+       back       = excluded.back,
+       line_id    = excluded.line_id,
+       word_id    = excluded.word_id,
+       grammar_id = excluded.grammar_id
      RETURNING id`,
   );
   const insSrs = db.prepare(
@@ -266,6 +389,7 @@ function materialize(
       JSON.stringify(back),
       now,
     ) as { id: number } | null;
+    keys.add(dedupeKey);
     if (!row) return;
     const fresh = freshState();
     const before = db
@@ -311,6 +435,7 @@ function materialize(
       ) as { id: number };
 
       linkWord.run(row.id, songId, lineId, token.surface);
+      wordLinks.add(`${row.id}:${lineId}`);
 
       if (shouldEnroll(token.priority)) {
         enrolledHere.push({ token, wordId: row.id });
@@ -330,10 +455,7 @@ function materialize(
             glosses,
             // How it appeared in the song, with its own reading, since the
             // inflected form is what the user will meet again.
-            note:
-              token.surface !== entry.headword
-                ? `Seen in the song as ${token.surface} (${token.romaji})`
-                : undefined,
+            note: noteForSurface(token, entry.headword),
           },
           { wordId: row.id, lineId },
         );
@@ -354,7 +476,11 @@ function materialize(
       ) as { id: number };
       addCard(
         'grammar',
-        `grammar:${note.key}`,
+        // Scoped to the song: the front of a grammar card is one of *this*
+        // song's lines. A key shared across songs meant the second import
+        // overwrote the example with a line the card does not belong to, so
+        // studying song A served a lyric from song B.
+        `grammar:${songId}:${note.key}`,
         {
           prompt: `What does ${note.pattern} do?`,
           jp: lineText,
@@ -403,7 +529,10 @@ function materialize(
           reading: token.reading,
           romaji: token.romaji,
           furigana: token.furigana,
-          glosses: token.entry?.senses.flatMap((s) => s.glosses).slice(0, 3),
+          // The answer here is the inflected surface, so the meaning has to
+          // follow it: 見えない is not "to be visible".
+          glosses: glossesFor(token),
+          note: noteForSurface(token),
         },
         { wordId, lineId },
       );
@@ -433,5 +562,65 @@ function materialize(
     }
   });
 
-  return { wordsEnrolled, wordsSongOnly, grammarPoints, cardsCreated };
+  return { wordsEnrolled, wordsSongOnly, grammarPoints, cardsCreated, keys, wordLinks };
+}
+
+/**
+ * Removes what a fresh pass over the same lyrics no longer produces.
+ *
+ * A lesson is upserted, never replaced, so the user's review history survives a
+ * re-import. The cost is that anything the old pass got wrong stays: when a
+ * better dictionary lookup moved きいて off 菊 "chrysanthemum", the 菊 card and
+ * its link to the song remained, and the queue kept asking about a flower that is
+ * not in the song. Only rows this song owns are touched, and a word is dropped
+ * solely when no song links it any more — deleting one takes its cards, and with
+ * them their history, so the condition has to be exact.
+ */
+function pruneStale(
+  db: Database,
+  songId: number,
+  produced: { keys: Set<string>; wordLinks: Set<string> },
+): { cardsPruned: number; linksPruned: number } {
+  const countCards = db.query<{ n: number }, [number]>(
+    'SELECT COUNT(*) AS n FROM cards WHERE song_id = ?',
+  );
+  const before = countCards.get(songId)?.n ?? 0;
+
+  // Vocabulary cards are exempt: a word below the enrolment bar gets no card
+  // here, and the user can add one by hand from the song page. Judging those by
+  // "did this pass produce the key" would delete every card they chose to study.
+  // Their cleanup runs through the word links below instead.
+  const cards = db
+    .query<{ id: number; dedupe_key: string }, [number]>(
+      `SELECT id, dedupe_key FROM cards
+       WHERE song_id = ? AND kind IN ('cloze', 'grammar', 'listening')`,
+    )
+    .all(songId);
+  const stale = cards.filter((c) => !produced.keys.has(c.dedupe_key));
+
+  const delCard = db.prepare('DELETE FROM cards WHERE id = ?');
+  for (const card of stale) delCard.run(card.id);
+
+  const links = db
+    .query<{ word_id: number; line_id: number }, [number]>(
+      'SELECT word_id, line_id FROM word_songs WHERE song_id = ?',
+    )
+    .all(songId);
+  const staleLinks = links.filter((l) => !produced.wordLinks.has(`${l.word_id}:${l.line_id}`));
+
+  const delLink = db.prepare('DELETE FROM word_songs WHERE word_id = ? AND line_id = ?');
+  const delWord = db.prepare(
+    `DELETE FROM words WHERE id = ?
+     AND NOT EXISTS (SELECT 1 FROM word_songs ws WHERE ws.word_id = words.id)`,
+  );
+  for (const link of staleLinks) delLink.run(link.word_id, link.line_id);
+  // Words this song was the last to mention, and the cards that hung off them.
+  // Scoped to the links just removed: a word orphaned by something else is not
+  // this pass's business, and deleting one costs its review history.
+  for (const wordId of new Set(staleLinks.map((l) => l.word_id))) delWord.run(wordId);
+
+  // Counted from the table rather than from `stale`, so the vocabulary cards that
+  // went with a deleted word are included.
+  const after = countCards.get(songId)?.n ?? 0;
+  return { cardsPruned: Math.max(0, before - after), linksPruned: staleLinks.length };
 }

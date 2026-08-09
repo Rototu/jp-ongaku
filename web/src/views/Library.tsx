@@ -1,5 +1,11 @@
 import { useMemo, useState } from 'react';
-import { api, type ImportResult, type LibrarySong, type SearchHit } from '../lib/api';
+import {
+  api,
+  type ImportResult,
+  type LibrarySong,
+  type SearchHit,
+  type YoutubeMeta,
+} from '../lib/api';
 import { useAsync } from '../lib/useAsync';
 import { useCommands, useRail } from '../lib/shell';
 import { Art, Pips } from '../components/bits';
@@ -165,9 +171,9 @@ function SongCard({
   return (
     <div className={`song-card${started || song.favourite ? '' : ' quiet'}`} onClick={onOpen}>
       <div className="top">
-        <Art quiet={!started} size={64} />
+        <Art quiet={!started} size={64} youtubeId={song.youtubeId} seed={song.title} />
         <div className="who">
-          <div className="title">
+          <div className="title one-line" title={song.title}>
             {song.titleFurigana && song.titleFurigana.length > 0 ? (
               <Furigana segments={song.titleFurigana} />
             ) : (
@@ -175,11 +181,11 @@ function SongCard({
             )}
           </div>
           {song.titleRomaji && (
-            <div className="mono faint" style={{ fontSize: 11 }}>
+            <div className="mono faint one-line" style={{ fontSize: 11 }} title={song.titleRomaji}>
               {song.titleRomaji}
             </div>
           )}
-          <div style={{ fontSize: 13, color: 'var(--muted)' }}>
+          <div className="one-line" style={{ fontSize: 13, color: 'var(--muted)' }} title={song.artist}>
             {song.artistFurigana && song.artistFurigana.length > 0 ? (
               <Furigana segments={song.artistFurigana} />
             ) : (
@@ -215,23 +221,47 @@ function SongCard({
           {song.synced ? ' · TIMED' : ''}
           {song.analyzed ? ' · EXPLAINED' : ' · NOT EXPLAINED YET'}
         </span>
-        <button
-          className="ghost small"
-          onClick={async (e) => {
-            e.stopPropagation();
-            if (!confirming) {
+        {confirming ? (
+          <span className="row" style={{ gap: 6, flexShrink: 0 }}>
+            <button
+              className="ghost small"
+              onClick={async (e) => {
+                e.stopPropagation();
+                await api.deleteSong(song.id);
+                onChanged();
+              }}
+            >
+              Delete
+            </button>
+            <button
+              className="ghost small"
+              onClick={(e) => {
+                e.stopPropagation();
+                setConfirming(false);
+              }}
+            >
+              Cancel
+            </button>
+          </span>
+        ) : (
+          <button
+            className="ghost small"
+            onClick={(e) => {
+              e.stopPropagation();
               setConfirming(true);
-              return;
-            }
-            await api.deleteSong(song.id);
-            onChanged();
-          }}
-        >
-          {confirming ? 'Really delete?' : '✕'}
-        </button>
+            }}
+          >
+            ✕
+          </button>
+        )}
       </div>
     </div>
   );
+}
+
+/** True for text the import field should treat as a video rather than a title. */
+function isYoutubeLink(text: string): boolean {
+  return /(youtube\.com|youtu\.be)\//i.test(text.trim());
 }
 
 /**
@@ -240,6 +270,11 @@ function SongCard({
  * A title is enough: LRCLIB is searched for it, Japanese results with timings
  * rank first, and everything else — video, notes, hand-pasted lyrics — is a chip
  * away and editable later.
+ *
+ * A YouTube link is enough too, and is the better path: the video says what the
+ * song is *and* how long it runs, so the candidates can be ranked against the
+ * recording the user is going to sing along to — the full song above the TV-size
+ * edit — and the video attaches itself to whatever they pick.
  */
 function ImportCard({ onImported }: { onImported: (r: ImportResult) => void }) {
   const [query, setQuery] = useState('');
@@ -253,6 +288,9 @@ function ImportCard({ onImported }: { onImported: (r: ImportResult) => void }) {
   const [showPaste, setShowPaste] = useState(false);
   const [youtube, setYoutube] = useState('');
   const [context, setContext] = useState('');
+  const [video, setVideo] = useState<YoutubeMeta | null>(null);
+
+  const pasted = isYoutubeLink(query);
 
   const search = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -261,11 +299,28 @@ function ImportCard({ onImported }: { onImported: (r: ImportResult) => void }) {
     setError(null);
     setHits(null);
     try {
-      const res = await api.search(query.trim());
-      setHits(res.hits);
-      if (res.hits.length === 0) {
-        setError('Nothing found. Try the Japanese title, or paste the lyrics instead.');
-        setShowPaste(true);
+      if (pasted) {
+        const res = await api.resolveYoutube(query.trim());
+        setVideo(res.video);
+        // The link is the video now: no reason to make them paste it twice.
+        setYoutube(res.video.videoId);
+        setHits(res.hits);
+        if (res.error) setError(res.error);
+        else if (res.hits.length === 0) {
+          setError(
+            `Read the video as “${res.video.title}” by ${res.video.artist || 'unknown'}, but found no lyrics for it. ` +
+              'Try typing the title instead, or paste the lyrics.',
+          );
+          setShowPaste(true);
+        }
+      } else {
+        setVideo(null);
+        const res = await api.search(query.trim());
+        setHits(res.hits);
+        if (res.hits.length === 0) {
+          setError('Nothing found. Try the Japanese title, or paste the lyrics instead.');
+          setShowPaste(true);
+        }
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Search failed');
@@ -296,17 +351,17 @@ function ImportCard({ onImported }: { onImported: (r: ImportResult) => void }) {
       <div className="row" style={{ alignItems: 'baseline', gap: 12 }}>
         <h2 style={{ fontSize: 28 }}>What are you listening to?</h2>
         <span className="faint" style={{ fontSize: 13 }}>
-          Japanese or romaji. One field is all we need.
+          A title or a YouTube link. One field is all we need.
         </span>
       </div>
 
       <form className="one-field" onSubmit={search}>
         <div className="field">
-          <span style={{ fontSize: 18, color: 'var(--faint)' }}>⌕</span>
+          <span style={{ fontSize: 18, color: 'var(--faint)' }}>{pasted ? '▶' : '⌕'}</span>
           <input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="紅蓮華 / Gurenge"
+            placeholder="紅蓮華 / Gurenge — or paste a youtube link"
             autoFocus
           />
           {hits && (
@@ -316,17 +371,50 @@ function ImportCard({ onImported }: { onImported: (r: ImportResult) => void }) {
           )}
         </div>
         <button className="primary find" disabled={busy || !query.trim()}>
-          {busy ? <span className="spinner" /> : 'Find it'}
+          {busy ? <span className="spinner" /> : pasted ? 'Read it' : 'Find it'}
         </button>
       </form>
 
+      {video && (
+        <div className="from-video">
+          <img
+            className="shot"
+            src={video.thumbnailUrl ?? `https://i.ytimg.com/vi/${video.videoId}/mqdefault.jpg`}
+            alt=""
+          />
+          <div className="who">
+            <div className="cap">from the video</div>
+            <div style={{ fontWeight: 700 }}>
+              <span className="jps">{video.title}</span>
+              {video.artist ? <span className="faint"> · {video.artist}</span> : null}
+            </div>
+            <div className="mono faint" style={{ fontSize: 11.5 }}>
+              {video.durationSec ? `${formatDuration(video.durationSec)} · ` : ''}
+              {video.channel}
+              {video.guessedBy === 'ai' ? ' · title split by the AI layer' : ''}
+            </div>
+          </div>
+          {/* Says out loud what the ranking below is doing, so a surprising order
+              reads as deliberate rather than broken. */}
+          <span className="cap" style={{ textAlign: 'right', maxWidth: 190 }}>
+            {video.durationSec
+              ? 'lyrics closest to this length rank first'
+              : 'the video will be attached'}
+          </span>
+        </div>
+      )}
+
       <div className="chips">
-        <button
-          className={`chip${showVideo ? ' on' : ''}`}
-          onClick={() => setShowVideo((v) => !v)}
-        >
-          ＋ Add a video link
-        </button>
+        {/* Hidden once a link has been read: the video is already attached, and
+            offering to add one reads as if it were not. */}
+        {!video && (
+          <button
+            className={`chip${showVideo ? ' on' : ''}`}
+            onClick={() => setShowVideo((v) => !v)}
+          >
+            ＋ Add a video link
+          </button>
+        )}
         <button
           className={`chip${showContext ? ' on' : ''}`}
           onClick={() => setShowContext((v) => !v)}
@@ -344,7 +432,7 @@ function ImportCard({ onImported }: { onImported: (r: ImportResult) => void }) {
         </span>
       </div>
 
-      {showVideo && (
+      {showVideo && !video && (
         <label>
           <div className="cap" style={{ marginBottom: 4 }}>
             youtube link — enables sing-along, stage mode and listening cards
@@ -400,7 +488,12 @@ function ImportCard({ onImported }: { onImported: (r: ImportResult) => void }) {
               className={`hit${i === 0 && hit.japanese ? ' first' : ''}${hit.japanese ? '' : ' dim'}`}
               key={hit.id}
             >
-              <Art quiet={!hit.japanese} size={52} />
+              <Art
+                quiet={!hit.japanese}
+                size={52}
+                youtubeId={video?.videoId}
+                seed={hit.trackName}
+              />
               <div className="who">
                 <div className="title">
                   <TitleText

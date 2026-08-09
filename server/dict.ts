@@ -10,21 +10,58 @@ const hasKanjiChar = (s: string) => KANJI_RE.test(s);
 const DEAD_TAGS = new Set(['arch', 'obs', 'obsc', 'rare', 'dated']);
 
 /**
+ * Word classes the tokenizer reports, mapped onto the JMdict part-of-speech
+ * tags that belong to them.
+ *
+ * A tag matches by prefix, which is how JMdict is built: every verb tag starts
+ * `v` (v1, v5k, vs-i, vk), every i-adjective `adj-i`. The nominal set is wide on
+ * purpose — ipadic files na-adjectives and adverbs like ばらばら under 名詞, so a
+ * strict "nouns only" test would reject the very entry that is right.
+ */
+const POS_CLASSES: Record<string, string[]> = {
+  動詞: ['v'],
+  形容詞: ['adj-i', 'adj-ix', 'adj-f'],
+  副詞: ['adv', 'n', 'adj-na', 'adj-no', 'exp'],
+  名詞: ['n', 'pn', 'adj-na', 'adj-no', 'adj-t', 'adv', 'vs', 'exp', 'ctr', 'num'],
+  連体詞: ['adj-pn', 'adj-no', 'exp'],
+  感動詞: ['int', 'exp'],
+  接続詞: ['conj', 'exp'],
+};
+
+/** Does the entry describe a word of the class the tokenizer reported? */
+function matchesClass(entry: DictEntryLite, pos: string | undefined): boolean | undefined {
+  const prefixes = pos ? POS_CLASSES[pos] : undefined;
+  if (!prefixes) return undefined; // No opinion: unknown or unmapped class.
+  return entry.senses.some((s) => s.pos.some((t) => prefixes.some((p) => t.startsWith(p))));
+}
+
+/**
  * Ranks competing entries for the same term.
  *
- * The two cases this exists for: なる matching the archaic classical copula
- * instead of 成る "to become", and kana-written いつか matching 五日 "the 5th"
- * instead of 何時か "someday". Archaic entries are pushed down hard, and for
- * kana input the 'uk' tag ("usually written in kana alone") is a strong signal
- * that this is the spelling the writer meant.
+ * The cases this exists for: なる matching the archaic classical copula instead
+ * of 成る "to become", kana-written いつか matching 五日 "the 5th" instead of
+ * 何時か "someday", and kana-written きいて — a verb — matching the noun 菊
+ * "chrysanthemum". Archaic entries are pushed down hard; for kana input the 'uk'
+ * tag ("usually written in kana alone") is a strong signal that this is the
+ * spelling the writer meant; and an entry of the wrong word class is worse than
+ * any of them, since a noun can never be what a conjugated verb meant.
  */
-function rank(entry: DictEntryLite, term: string, wantKana: boolean): number {
+function rank(
+  entry: DictEntryLite,
+  term: string,
+  wantKana: boolean,
+  pos?: string,
+): number {
   let score = 0;
 
   const allArchaic = entry.senses.every((s) =>
     [...s.misc, ...s.info].some((t) => DEAD_TAGS.has(t)),
   );
   if (allArchaic) score -= 100;
+
+  const classOk = matchesClass(entry, pos);
+  if (classOk === true) score += 40;
+  else if (classOk === false) score -= 80;
 
   if (wantKana) {
     if (entry.senses.some((s) => s.misc.includes('uk'))) score += 30;
@@ -33,6 +70,11 @@ function rank(entry: DictEntryLite, term: string, wantKana: boolean): number {
 
   if (entry.common) score += 10;
   if (entry.freqRank !== null) score += Math.max(0, 12 - Math.log10(Math.max(entry.freqRank, 10)));
+
+  // How central the word is, standing in for the frequency data JMdict does not
+  // ship: 聞く carries eight senses, 効く four, and both read きく. Capped so a
+  // sprawling entry cannot outweigh the signals above.
+  score += Math.min(6, entry.senses.length);
 
   return score;
 }
@@ -147,14 +189,19 @@ class Dict {
    *
    * When the word is written in kana, a kana-headword entry is preferred over a
    * kanji one — otherwise いつか ("someday") resolves to 五日 ("the 5th").
+   *
+   * `pos` is the tokenizer's word class (動詞, 名詞, …). Passing it keeps a
+   * conjugated verb from resolving to a homophonous noun: きいて reads きく, and
+   * so does the noun 菊.
    */
   lookup(args: {
     surface: string;
     reading?: string;
     baseForm?: string;
     baseReading?: string;
+    pos?: string;
   }): DictEntryLite | undefined {
-    const { surface, reading, baseForm, baseReading } = args;
+    const { surface, reading, baseForm, baseReading, pos } = args;
     const terms = [baseForm, surface].filter(
       (x): x is string => typeof x === 'string' && x.length > 0,
     );
@@ -176,7 +223,15 @@ class Dict {
         }
       }
 
-      const ranked = [...pool].sort((a, b) => rank(b, term, wantKana) - rank(a, term, wantKana));
+      // A term whose only reading-matched entries are the wrong word class is
+      // better answered by the wider pool: 菊 and 聞く both read きく, and the
+      // reading alone cannot tell a noun from a verb.
+      const sameClass = pool.filter((e) => matchesClass(e, pos) === true);
+      const candidates = sameClass.length > 0 ? sameClass : pool;
+
+      const ranked = [...candidates].sort(
+        (a, b) => rank(b, term, wantKana, pos) - rank(a, term, wantKana, pos),
+      );
       return ranked[0];
     }
     return undefined;
