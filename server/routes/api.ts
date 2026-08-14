@@ -735,7 +735,12 @@ api.get('/review/queue', (c) => {
   const previews: Record<number, ReturnType<typeof srs.previewIntervals>> = {};
   for (const card of cards) previews[card.id] = srs.previewIntervals(card.id);
 
-  return c.json({ cards, cloze: buildClozeChoices(cards), previews });
+  return c.json({
+    cards,
+    cloze: buildClozeChoices(cards),
+    listening: buildListeningChoices(cards),
+    previews,
+  });
 });
 
 /**
@@ -797,6 +802,98 @@ function buildClozeChoices(
     out[card.id] = choices;
   }
   return out;
+}
+
+/**
+ * What a listening card asks: which of four meanings the line just sung carries.
+ *
+ * The card used to play a clip and then show the line, with nothing in between —
+ * the user could only report to themselves whether they had understood, and
+ * "yes" was always available. Hearing a line and knowing what it means are the
+ * same skill only if the second half is actually asked, so it is asked here, and
+ * the answer is checkable.
+ *
+ * The question is assembled at queue time rather than baked into the card,
+ * because translations come from the analysis pass, which runs after the cards
+ * are built and can be re-run against a better model later. The card carries the
+ * line; the meaning it is worth is read fresh.
+ *
+ * Distractors come from the same song first. Lines from elsewhere are too easy
+ * to eliminate on subject alone — the point is to have heard *this* line, not to
+ * recognise which album it belongs to.
+ */
+function buildListeningChoices(
+  cards: { id: number; kind: string; back: { lineTranslation?: string } }[],
+): Record<number, string[]> {
+  const db = getDb();
+  const out: Record<number, string[]> = {};
+
+  const own = db.query<{ line_id: number; song_id: number | null; translation: string | null }, [number]>(
+    `SELECT c.line_id, c.song_id, a.translation
+       FROM cards c LEFT JOIN line_analysis a ON a.line_id = c.line_id
+      WHERE c.id = ?`,
+  );
+  const others = db.query<{ translation: string }, [number, number]>(
+    `SELECT a.translation
+       FROM line_analysis a JOIN lines l ON l.id = a.line_id
+      WHERE a.translation IS NOT NULL AND trim(a.translation) != '' AND l.id != ?
+      ORDER BY (l.song_id = ?) DESC, RANDOM()
+      LIMIT 40`,
+  );
+
+  for (const card of cards) {
+    if (card.kind !== 'listening') continue;
+    const row = own.get(card.id);
+    const answer = row?.translation?.trim();
+    // No translation yet means no question worth asking. The card falls back to
+    // the plain reveal rather than shipping three distractors and no answer.
+    if (!row || !answer) continue;
+
+    const picked: string[] = [];
+    for (const candidate of others.all(row.line_id, row.song_id ?? -1)) {
+      const text = candidate.translation.trim();
+      if (!text) continue;
+      if (tooAlike(text, answer) || picked.some((p) => tooAlike(text, p))) continue;
+      picked.push(text);
+      if (picked.length === 3) break;
+    }
+    if (picked.length === 0) continue;
+
+    const choices = [answer, ...picked];
+    for (let i = choices.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [choices[i], choices[j]] = [choices[j], choices[i]];
+    }
+    out[card.id] = choices;
+    // The client compares the pick against this, so it has to be the same string
+    // the option was built from.
+    card.back.lineTranslation = answer;
+  }
+  return out;
+}
+
+/**
+ * Whether two translations are close enough that offering both is unfair.
+ *
+ * Songs repeat themselves, and a chorus line translated twice comes back as "I
+ * can't see it" and "I cannot see it" — two options that are both right, on a
+ * card that only accepts one.
+ */
+function tooAlike(a: string, b: string): boolean {
+  const words = (s: string) =>
+    new Set(
+      s
+        .toLowerCase()
+        .replace(/[^\p{L}\p{N}\s]/gu, ' ')
+        .split(/\s+/)
+        .filter(Boolean),
+    );
+  const x = words(a);
+  const y = words(b);
+  if (x.size === 0 || y.size === 0) return true;
+  let shared = 0;
+  for (const word of x) if (y.has(word)) shared++;
+  return shared / Math.min(x.size, y.size) > 0.6;
 }
 
 api.post('/review/grade', async (c) => {

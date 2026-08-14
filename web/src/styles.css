@@ -3297,6 +3297,66 @@ rt {
   opacity: 0.55;
 }
 
+/* A listening card's four meanings. One column, left-aligned and full width:
+   these are sentences rather than words, and a grid of them wraps into ragged
+   blocks that get read as shapes instead of read. */
+.meaning-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  width: 100%;
+  max-width: 560px;
+  margin: 0 auto;
+}
+
+.meaning-grid button {
+  background: var(--white);
+  border: 2px solid var(--line);
+  border-radius: 14px;
+  padding: 13px 15px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  text-align: left;
+  font-size: 15.5px;
+  line-height: 1.45;
+}
+
+.meaning-grid button:hover:not(:disabled) {
+  background: var(--lime-pale);
+  border-color: var(--ink);
+}
+
+.meaning-grid button .mark {
+  margin-left: auto;
+  font-weight: 800;
+}
+
+.meaning-grid button.correct {
+  background: var(--mint-pale);
+  border-color: var(--leaf);
+  box-shadow: 3px 3px 0 var(--leaf);
+  opacity: 1;
+}
+
+.meaning-grid button.correct .mark {
+  color: var(--leaf-dark);
+}
+
+.meaning-grid button.wrong {
+  background: var(--coral-pale);
+  border-color: var(--coral);
+  opacity: 1;
+}
+
+.meaning-grid button.wrong .mark {
+  color: var(--coral-text);
+}
+
+.meaning-grid button:disabled {
+  opacity: 0.55;
+}
+
 .grade-row {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
@@ -3340,6 +3400,27 @@ rt {
 
 .grade-row button.again:hover:not(:disabled) {
   background: var(--coral-pale);
+}
+
+/* A missed multiple-choice card: one button, and the reason it is the only one. */
+.grade-row.locked {
+  grid-template-columns: 1fr;
+  justify-items: center;
+  gap: 8px;
+}
+
+.grade-row.locked .why {
+  font-size: 13.5px;
+  color: var(--muted);
+  margin: 0;
+}
+
+.grade-row.locked .why b {
+  color: var(--coral-text);
+}
+
+.grade-row.locked button.again {
+  min-width: 240px;
 }
 
 .grade-row button.again .n {

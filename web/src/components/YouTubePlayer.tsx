@@ -122,28 +122,50 @@ export function YouTubePlayer({
       .then(() => {
         if (cancelled || !hostRef.current || !window.YT) return;
 
-        const player = new window.YT.Player(hostRef.current, {
+        // The API replaces the element it is handed with the iframe, so it gets a
+        // throwaway child rather than the ref'd host: handing it the host would
+        // detach the node React owns, and the next video would then build its
+        // player inside an element no longer in the document.
+        const mount = document.createElement('div');
+        mount.style.width = '100%';
+        mount.style.height = '100%';
+        hostRef.current.appendChild(mount);
+
+        const player = new window.YT.Player(mount, {
           videoId,
           playerVars: { playsinline: 1, rel: 0, modestbranding: 1 },
           events: {
             onReady: () => {
               if (cancelled) return;
               setDurationMs(player.getDuration() * 1000);
+              // Every method checks `cancelled` first. Callers hold the handle in
+              // state, so one outlives its player whenever this component is
+              // remounted — a review session unmounts it between listening cards
+              // — and driving a destroyed player throws inside YouTube's own
+              // code. Thrown from an effect, that took the whole app down.
               const handle: PlayerHandle = {
-                play: () => player.playVideo(),
-                pause: () => player.pauseVideo(),
+                play: () => {
+                  if (!cancelled) player.playVideo();
+                },
+                pause: () => {
+                  if (!cancelled) player.pauseVideo();
+                },
                 toggle: () => {
+                  if (cancelled) return;
                   const playing = player.getPlayerState() === window.YT?.PlayerState.PLAYING;
                   if (playing) player.pauseVideo();
                   else player.playVideo();
                 },
-                seekMs: (ms) => player.seekTo(ms / 1000, true),
+                seekMs: (ms) => {
+                  if (!cancelled) player.seekTo(ms / 1000, true);
+                },
                 playClip: (startMs, endMs) => {
+                  if (cancelled) return;
                   clipEndRef.current = endMs;
                   player.seekTo(startMs / 1000, true);
                   player.playVideo();
                 },
-                currentMs: () => player.getCurrentTime() * 1000,
+                currentMs: () => (cancelled ? 0 : player.getCurrentTime() * 1000),
               };
               onReady?.(handle);
             },
@@ -189,6 +211,9 @@ export function YouTubePlayer({
         /* the iframe may already be gone */
       }
       playerRef.current = null;
+      // Whatever destroy() left behind was appended here by hand, not by React,
+      // so clearing it cannot fight the reconciler.
+      hostRef.current?.replaceChildren();
     };
     // Recreate the player only when the video changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps

@@ -205,6 +205,29 @@ export function backfillWordSurfaces(): number {
   return filled;
 }
 
+/** What a listening card asks, once it started asking something answerable. */
+const LISTENING_PROMPT = 'What is this line saying?';
+
+/**
+ * Repoints existing listening cards at the meaning question.
+ *
+ * The old card played a clip and then showed the line — "listen, then read the
+ * line" — which the user graded against nothing but their own word. The card now
+ * asks which of four meanings was sung, and the options are assembled per
+ * session, so only the stored prompt needs moving. Card ids are untouched, so
+ * the scheduling history of every line survives.
+ */
+export function backfillListeningPrompts(): number {
+  const db = getDb();
+  const changed = db
+    .prepare(
+      `UPDATE cards SET front = json_set(front, '$.prompt', ?)
+        WHERE kind = 'listening' AND json_extract(front, '$.prompt') IS NOT ?`,
+    )
+    .run(LISTENING_PROMPT, LISTENING_PROMPT);
+  return Number(changed.changes ?? 0);
+}
+
 function safeSegments(json: string): { text: string; ruby: string }[] {
   try {
     const parsed = JSON.parse(json);

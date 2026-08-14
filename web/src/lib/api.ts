@@ -279,6 +279,8 @@ export const api = {
     return request<{
       cards: Card[];
       cloze: Record<number, ClozeChoice[]>;
+      /** Listening: the four meanings on offer, the right one among them. */
+      listening: Record<number, string[]>;
       previews: Record<number, GradePreview>;
     }>(`/review/queue?${p}`);
   },

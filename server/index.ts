@@ -7,6 +7,7 @@ import { getDb } from './db';
 import { backfillTitles } from './lesson/titles';
 import {
   backfillCardReadings,
+  backfillListeningPrompts,
   backfillWordSurfaces,
   realignWordReadings,
 } from './lesson/backfill-cards';
@@ -48,6 +49,12 @@ try {
   const surfaced = backfillWordSurfaces();
   if (surfaced > 0) {
     console.log(`  recorded the surface form on ${surfaced} word/line link${surfaced === 1 ? '' : 's'}`);
+  }
+
+  // Listening cards that still ask to be graded on the honour system.
+  const reasked = backfillListeningPrompts();
+  if (reasked > 0) {
+    console.log(`  turned ${reasked} listening card${reasked === 1 ? '' : 's'} into meaning questions`);
   }
 } catch (err) {
   console.error('[cards] reading backfill failed:', err);
