@@ -548,7 +548,10 @@ function materialize(
         'listening',
         `listening:${lineId}`,
         {
-          prompt: 'Listen, then read the line',
+          // The question itself — four meanings to choose between — is assembled
+          // in the review queue, since the translations it needs arrive with the
+          // analysis pass rather than with the lesson.
+          prompt: 'What is this line saying?',
           audio: { youtubeId: input.youtubeId, startMs: timeMs, endMs },
         },
         {

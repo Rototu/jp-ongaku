@@ -20,6 +20,8 @@ interface Session {
   cards: Card[];
   /** Cloze options, keyed by card id, each carrying its own reading. */
   cloze: Record<number, ClozeChoice[]>;
+  /** Listening options: the meanings a heard line might carry, in English. */
+  listening: Record<number, string[]>;
   previews: Record<number, GradePreview>;
 }
 
@@ -173,6 +175,46 @@ export function Review({
     }
   };
 
+  const choices = useMemo(
+    () => (card && session ? (session.cloze[card.id] ?? []) : []),
+    [card, session],
+  );
+
+  /**
+   * A listening card's four meanings, and which of them is right.
+   *
+   * The card asks what the line said, not whether the user feels they followed
+   * it — so the answer here is the line's translation, and a pick is checkable
+   * against it. Older sessions, and lines the analysis pass has not reached, come
+   * back with no options; those fall through to a plain reveal.
+   */
+  const heardChoices = useMemo(
+    () => (card?.kind === 'listening' && session ? (session.listening[card.id] ?? []) : []),
+    [card, session],
+  );
+  const heardAnswer = card?.back.lineTranslation ?? '';
+
+  /**
+   * A multiple-choice card the user got wrong, which grades itself.
+   *
+   * Where an option was picked the card already knows the answer, so leaving all
+   * four grade buttons up invites "Good" on a card that was just missed — and a
+   * card graded Good is a card the schedule stops showing for weeks. Self-grading
+   * is for cards where only the user can tell how close they were; it is not a
+   * negotiation over an answer the card already marked wrong.
+   */
+  const isMultipleChoice =
+    (card?.kind === 'cloze' && choices.length > 0) ||
+    (card?.kind === 'listening' && heardChoices.length > 0);
+  const correctChoice = card?.kind === 'listening' ? heardAnswer : (card?.back.answer ?? '');
+  const missed = isMultipleChoice && chosen !== null && chosen !== correctChoice;
+
+  /** Takes an answer on a multiple-choice card, which also reveals it. */
+  const pick = useCallback((option: string) => {
+    setChosen((current) => current ?? option);
+    setRevealed(true);
+  }, []);
+
   // --- keyboard -------------------------------------------------------------
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -182,12 +224,38 @@ export function Review({
       // Accept both `code` and `key`: some input sources (and non-US layouts)
       // report only one of the two for the space bar.
       const isSpace = e.code === 'Space' || e.key === ' ' || e.key === 'Spacebar';
+
+      // A multiple-choice card is answered, never revealed: 1-4 take the pick.
+      // Space would otherwise open the answer with nothing staked on it, and the
+      // full grade row then accepts "Easy" on a card that was never attempted.
+      if (!revealed && isMultipleChoice) {
+        const options = card.kind === 'listening' ? heardChoices : choices.map((c) => c.text);
+        const idx = ['1', '2', '3', '4'].indexOf(e.key);
+        if (idx >= 0 && options[idx] !== undefined) {
+          e.preventDefault();
+          pick(options[idx]);
+          return;
+        }
+        if (isSpace || e.key === 'Enter') {
+          e.preventDefault();
+          return;
+        }
+      }
+
       if (!revealed && (isSpace || e.key === 'Enter')) {
         e.preventDefault();
         setRevealed(true);
         return;
       }
-      if (revealed && ['1', '2', '3', '4'].includes(e.key)) {
+      // A missed multiple-choice card has one button, so every key that means
+      // "continue" lands on it — and 2, 3 and 4 grade nothing, rather than
+      // quietly awarding a pass the card on screen contradicts.
+      if (revealed && missed) {
+        if (e.key === '1' || isSpace || e.key === 'Enter') {
+          e.preventDefault();
+          void grade(0, chosen ?? undefined);
+        }
+      } else if (revealed && ['1', '2', '3', '4'].includes(e.key)) {
         e.preventDefault();
         const quality = { '1': 0, '2': 2, '3': 4, '4': 5 }[e.key] as number;
         void grade(quality, chosen ?? undefined);
@@ -196,12 +264,18 @@ export function Review({
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [card, revealed, grade, chosen, playClip]);
-
-  const choices = useMemo(
-    () => (card && session ? (session.cloze[card.id] ?? []) : []),
-    [card, session],
-  );
+  }, [
+    card,
+    revealed,
+    grade,
+    chosen,
+    playClip,
+    missed,
+    isMultipleChoice,
+    choices,
+    heardChoices,
+    pick,
+  ]);
 
   /**
    * Meanings worth printing under the answer.
@@ -295,7 +369,9 @@ export function Review({
                 ▶ Replay clip <span className="kbd">H</span>
               </button>
               <span className="faint" style={{ fontSize: 13 }}>
-                Listen first, then reveal the line.
+                {heardChoices.length > 0
+                  ? 'Play it as often as you need, then pick what it means.'
+                  : 'Listen first, then reveal the line.'}
               </span>
             </div>
           </div>
@@ -322,7 +398,7 @@ export function Review({
 
           {card.kind === 'cloze' && choices.length > 0 && (
             <div className="choice-grid">
-              {choices.map((choice) => (
+              {choices.map((choice, i) => (
                 <button
                   key={choice.text}
                   className={
@@ -334,13 +410,10 @@ export function Review({
                           : ''
                       : ''
                   }
-                  onClick={() => {
-                    if (chosen) return;
-                    setChosen(choice.text);
-                    setRevealed(true);
-                  }}
+                  onClick={() => pick(choice.text)}
                   disabled={!!chosen}
                 >
+                  {!chosen && <span className="kbd">{i + 1}</span>}
                   <span className="jp-line">
                     <Furigana segments={choice.furigana} />
                   </span>
@@ -355,6 +428,34 @@ export function Review({
                             : ''
                         : ''}
                     </small>
+                  )}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {card.kind === 'listening' && heardChoices.length > 0 && (
+            <div className="meaning-grid">
+              {heardChoices.map((option, i) => (
+                <button
+                  key={option}
+                  className={
+                    chosen
+                      ? option === heardAnswer
+                        ? 'correct'
+                        : option === chosen
+                          ? 'wrong'
+                          : ''
+                      : ''
+                  }
+                  onClick={() => pick(option)}
+                  disabled={!!chosen}
+                >
+                  {!chosen && <span className="kbd">{i + 1}</span>}
+                  {option}
+                  {chosen && option === heardAnswer && <span className="mark">✓</span>}
+                  {chosen && option === chosen && option !== heardAnswer && (
+                    <span className="mark">✗</span>
                   )}
                 </button>
               ))}
@@ -394,7 +495,9 @@ export function Review({
                       <RubyText text={card.back.note} />
                     </div>
                   )}
-                  {card.back.lineTranslation && (
+                  {/* Already on screen with a tick next to it when the card was
+                      the question about it. */}
+                  {card.back.lineTranslation && heardChoices.length === 0 && (
                     <div className="note">
                       <RubyText text={card.back.lineTranslation} />
                     </div>
@@ -421,43 +524,71 @@ export function Review({
         </div>
 
         {!revealed ? (
-          <div className="row" style={{ justifyContent: 'center' }}>
-            <button className="primary" style={{ minWidth: 220 }} onClick={() => setRevealed(true)}>
-              Show answer <span className="kbd">space</span>
-            </button>
-          </div>
+          // A multiple-choice card has no reveal button: the options are how it
+          // is answered, and a peek followed by a self-awarded "Easy" is exactly
+          // the grade the options exist to replace.
+          isMultipleChoice ? (
+            <p className="muted" style={{ textAlign: 'center' }}>
+              Pick one — <span className="kbd">1</span>-<span className="kbd">4</span>.
+            </p>
+          ) : (
+            <div className="row" style={{ justifyContent: 'center' }}>
+              <button
+                className="primary"
+                style={{ minWidth: 220 }}
+                onClick={() => setRevealed(true)}
+              >
+                Show answer <span className="kbd">space</span>
+              </button>
+            </div>
+          )
         ) : (
           <>
-            <div className="grade-row">
-              <GradeButton
-                tone="again"
-                label="Again"
-                days={preview?.again}
-                n={1}
-                onClick={() => void grade(0, chosen ?? undefined)}
-              />
-              <GradeButton
-                tone="hard"
-                label="Hard"
-                days={preview?.hard}
-                n={2}
-                onClick={() => void grade(2, chosen ?? undefined)}
-              />
-              <GradeButton
-                tone="good"
-                label="Good"
-                days={preview?.good}
-                n={3}
-                onClick={() => void grade(4, chosen ?? undefined)}
-              />
-              <GradeButton
-                tone="easy"
-                label="Easy"
-                days={preview?.easy}
-                n={4}
-                onClick={() => void grade(5, chosen ?? undefined)}
-              />
-            </div>
+            {missed ? (
+              <div className="grade-row locked">
+                <p className="why">
+                  Wrong pick — this one comes back as <b>Again</b>.
+                </p>
+                <GradeButton
+                  tone="again"
+                  label="Again"
+                  days={preview?.again}
+                  n={1}
+                  onClick={() => void grade(0, chosen ?? undefined)}
+                />
+              </div>
+            ) : (
+              <div className="grade-row">
+                <GradeButton
+                  tone="again"
+                  label="Again"
+                  days={preview?.again}
+                  n={1}
+                  onClick={() => void grade(0, chosen ?? undefined)}
+                />
+                <GradeButton
+                  tone="hard"
+                  label="Hard"
+                  days={preview?.hard}
+                  n={2}
+                  onClick={() => void grade(2, chosen ?? undefined)}
+                />
+                <GradeButton
+                  tone="good"
+                  label="Good"
+                  days={preview?.good}
+                  n={3}
+                  onClick={() => void grade(4, chosen ?? undefined)}
+                />
+                <GradeButton
+                  tone="easy"
+                  label="Easy"
+                  days={preview?.easy}
+                  n={4}
+                  onClick={() => void grade(5, chosen ?? undefined)}
+                />
+              </div>
+            )}
 
             {askReason && (
               <div className="reason-row">
