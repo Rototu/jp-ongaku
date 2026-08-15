@@ -380,4 +380,26 @@ export const api = {
 
   saveSettings: (body: Record<string, string | null>) =>
     request<{ ok: true; llm: LlmStatus }>('/settings', { method: 'PUT', body: JSON.stringify(body) }),
+
+  /** The whole user database as a download — an <a href>, not a fetch. */
+  backupUrl: '/api/backup',
+
+  /**
+   * Replaces the user database with an uploaded backup. The server validates
+   * before touching anything, so a wrong file is an error, not data loss.
+   */
+  restoreBackup: async (file: File): Promise<{ ok: true; version: number; songs: number; cards: number }> => {
+    const res = await fetch('/api/backup/restore', { method: 'POST', body: file });
+    const text = await res.text();
+    const payload = text ? safeJson(text) : undefined;
+    if (!res.ok) {
+      const message =
+        (payload as { error?: string })?.error ?? `Restore failed with status ${res.status}`;
+      const err = new Error(message) as ApiError;
+      err.status = res.status;
+      err.payload = payload;
+      throw err;
+    }
+    return payload as { ok: true; version: number; songs: number; cards: number };
+  },
 };

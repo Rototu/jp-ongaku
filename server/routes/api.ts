@@ -1,5 +1,8 @@
 import { Hono } from 'hono';
-import { getDb, getSetting, nowIso, setSetting } from '../db';
+import { readFileSync, unlinkSync, writeFileSync } from 'node:fs';
+import { getDb, getSetting, nowIso, setSetting, closeDb, SCHEMA_VERSION } from '../db';
+import { snapshotDatabase, swapDatabase, validateDatabase } from '../backup';
+import { DATA_DIR, USER_DB } from '../paths';
 import { dict } from '../dict';
 import * as lrclib from '../lyrics/lrclib';
 import * as youtube from '../lyrics/youtube';
@@ -1190,4 +1193,72 @@ api.put('/settings', async (c) => {
     }
   }
   return c.json({ ok: true, llm: llmStatus() });
+});
+
+// --- backup -----------------------------------------------------------------
+
+/**
+ * The whole user database as one file, checkpointed out of WAL. Designed to be
+ * small — this is the file the README says you can copy by hand; the endpoint
+ * exists so the browser can do it for you.
+ */
+api.get('/backup', (_c) => {
+  const tmp = `${USER_DB}.snapshot-${process.pid}`;
+  snapshotDatabase(getDb(), USER_DB, tmp);
+  const bytes = readFileSync(tmp);
+  try {
+    unlinkSync(tmp);
+  } catch {
+    /* best effort cleanup */
+  }
+  const now = new Date().toISOString().replace(/[-:T]/g, '');
+  const stamp = `${now.slice(0, 8)}-${now.slice(8, 14)}`; // YYYYMMDD-HHMMSS
+  return new Response(new Uint8Array(bytes), {
+    headers: {
+      'Content-Type': 'application/x-sqlite3',
+      'Content-Disposition': `attachment; filename="ongaku-${stamp}.db"`,
+    },
+  });
+});
+
+/**
+ * Replaces the user database with an uploaded backup.
+ *
+ * Validated before anything is touched: a non-database or a schema from a
+ * newer app is refused with 422 and the running database is unchanged. Older
+ * schemas restore fine — migrations are idempotent and run at reopen.
+ */
+api.post('/backup/restore', async (c) => {
+  const bytes = new Uint8Array(await c.req.arrayBuffer());
+  if (bytes.byteLength === 0) return c.json({ error: 'no file received' }, 400);
+  if (bytes.byteLength > 1_000_000_000) {
+    return c.json({ error: 'that file is implausibly large for a backup' }, 400);
+  }
+
+  // Staged next to the real file so the final swap is a same-filesystem rename.
+  const staged = `${DATA_DIR}/ongaku-restore-${process.pid}.db`;
+  writeFileSync(staged, bytes);
+
+  const verdict = validateDatabase(staged, SCHEMA_VERSION);
+  if (!verdict.ok) {
+    try {
+      unlinkSync(staged);
+    } catch {
+      /* best effort cleanup */
+    }
+    return c.json({ error: verdict.error }, 422);
+  }
+
+  try {
+    swapDatabase({ src: staged, path: USER_DB, reset: closeDb, reopen: getDb });
+  } catch (err) {
+    return c.json({ error: err instanceof Error ? err.message : 'restore failed' }, 500);
+  }
+
+  const counts = getDb()
+    .query<{ songs: number; cards: number }, []>(
+      'SELECT (SELECT COUNT(*) FROM songs) AS songs, (SELECT COUNT(*) FROM cards) AS cards',
+    )
+    .get();
+  return c.json({ ok: true, version: verdict.version, ...counts });
 });

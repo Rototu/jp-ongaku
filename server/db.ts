@@ -9,6 +9,8 @@ import { USER_DB, ensureDirs } from './paths';
 
 const SCHEMA_VERSION = 7;
 
+export { SCHEMA_VERSION };
+
 let db: Database | null = null;
 
 export function getDb(): Database {
@@ -19,6 +21,22 @@ export function getDb(): Database {
   db.exec('PRAGMA foreign_keys = ON');
   migrate(db);
   return db;
+}
+
+/**
+ * Closes and forgets the cached handle; the next getDb() reopens from disk.
+ * Exists for restore: the file is replaced underneath the app, so every cached
+ * handle is stale the moment the rename lands.
+ */
+export function closeDb(): void {
+  if (!db) return;
+  try {
+    db.exec('PRAGMA wal_checkpoint(TRUNCATE)');
+    db.close();
+  } catch {
+    /* closing a handle that is somehow already gone is fine */
+  }
+  db = null;
 }
 
 /**
