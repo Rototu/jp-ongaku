@@ -410,6 +410,20 @@ api.delete('/songs/:id', (c) => {
   return c.json({ deleted: res.changes > 0 });
 });
 
+/**
+ * Literal SQL per reading-override field: identifiers are never interpolated.
+ * `field` comes from the `as const` tuple below, so these are the only two.
+ */
+const READING_SELECT = {
+  title: 'SELECT title AS text FROM songs WHERE id = ?',
+  artist: 'SELECT artist AS text FROM songs WHERE id = ?',
+} as const;
+
+const READING_UPDATE = {
+  title: 'UPDATE songs SET title_furigana = ?, title_romaji = ? WHERE id = ?',
+  artist: 'UPDATE songs SET artist_furigana = ?, artist_romaji = ? WHERE id = ?',
+} as const;
+
 api.patch('/songs/:id', async (c) => {
   const id = Number(c.req.param('id'));
   const body = await c.req.json<{
@@ -438,28 +452,31 @@ api.patch('/songs/:id', async (c) => {
   }
 
   // Reading overrides: the automatic guess is wrong for most coined titles.
+  // Identifiers are never interpolated: each field has its own literal SQL.
   for (const [field, value] of [
     ['title', body.titleReading],
     ['artist', body.artistReading],
   ] as const) {
     if (value === undefined) continue;
     const row = db
-      .query<{ text: string }, [number]>(`SELECT ${field} AS text FROM songs WHERE id = ?`)
+      .query<{ text: string }, [number]>(READING_SELECT[field])
       .get(id);
     if (!row) return c.json({ error: 'song not found' }, 404);
 
     if (!value.trim()) {
       // Cleared: fall back to the automatic annotation.
       const auto = await annotate(row.text);
-      db.prepare(
-        `UPDATE songs SET ${field}_furigana = ?, ${field}_romaji = ? WHERE id = ?`,
-      ).run(auto ? JSON.stringify(auto.furigana) : null, auto ? auto.romaji : '', id);
+      db.prepare(READING_UPDATE[field]).run(
+        auto ? JSON.stringify(auto.furigana) : null,
+        auto ? auto.romaji : '',
+        id,
+      );
       continue;
     }
 
     const applied = annotateWithReading(row.text, value);
     if (!applied) return c.json({ error: `Could not read "${value}" as a reading` }, 400);
-    db.prepare(`UPDATE songs SET ${field}_furigana = ?, ${field}_romaji = ? WHERE id = ?`).run(
+    db.prepare(READING_UPDATE[field]).run(
       JSON.stringify(applied.furigana),
       applied.romaji,
       id,
@@ -1236,7 +1253,7 @@ api.post('/backup/restore', async (c) => {
   }
 
   // Staged next to the real file so the final swap is a same-filesystem rename.
-  const staged = `${DATA_DIR}/ongaku-restore-${process.pid}.db`;
+  const staged = `${DATA_DIR}/ongaku-restore-${process.pid}-${Date.now()}.db`;
   writeFileSync(staged, bytes);
 
   const verdict = validateDatabase(staged, SCHEMA_VERSION);

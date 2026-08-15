@@ -68,11 +68,40 @@ function migrate(d: Database) {
   );
 }
 
+/**
+ * Every column a migration has ever added, as a complete literal statement.
+ *
+ * ALTER TABLE and PRAGMA take identifiers, which SQLite cannot parameterize —
+ * so the SQL is written out in full here and looked up by key. Nothing is ever
+ * interpolated into DDL, and an unknown column is a hard error instead of a
+ * silently wrong ALTER.
+ */
+const MIGRATION_COLUMNS: Record<string, Record<string, string>> = {
+  songs: {
+    title_furigana: 'ALTER TABLE songs ADD COLUMN title_furigana TEXT',
+    title_romaji: 'ALTER TABLE songs ADD COLUMN title_romaji TEXT',
+    artist_furigana: 'ALTER TABLE songs ADD COLUMN artist_furigana TEXT',
+    artist_romaji: 'ALTER TABLE songs ADD COLUMN artist_romaji TEXT',
+    context: 'ALTER TABLE songs ADD COLUMN context TEXT',
+    favourite: 'ALTER TABLE songs ADD COLUMN favourite INTEGER NOT NULL DEFAULT 0',
+  },
+  line_analysis: {
+    chunks: "ALTER TABLE line_analysis ADD COLUMN chunks TEXT NOT NULL DEFAULT '[]'",
+  },
+  word_songs: {
+    seen_as: 'ALTER TABLE word_songs ADD COLUMN seen_as TEXT',
+  },
+};
+
 /** Adds a column only when it isn't there yet, so migrations stay re-runnable. */
-function addColumn(d: Database, table: string, column: string, decl: string) {
-  const cols = d.query<{ name: string }, []>(`PRAGMA table_info(${table})`).all();
+function addColumn(d: Database, table: string, column: string) {
+  const alter = MIGRATION_COLUMNS[table]?.[column];
+  if (!alter) throw new Error(`unknown migration column: ${table}.${column}`);
+  const cols = d
+    .query<{ name: string }, [string]>('SELECT name FROM pragma_table_info(?)')
+    .all(table);
   if (cols.some((c) => c.name === column)) return;
-  d.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${decl}`);
+  d.exec(alter);
 }
 
 /**
@@ -80,10 +109,10 @@ function addColumn(d: Database, table: string, column: string, decl: string) {
  * like a song name is readable in the library without opening it.
  */
 function addTitleAnnotationColumns(d: Database) {
-  addColumn(d, 'songs', 'title_furigana', 'TEXT');
-  addColumn(d, 'songs', 'title_romaji', 'TEXT');
-  addColumn(d, 'songs', 'artist_furigana', 'TEXT');
-  addColumn(d, 'songs', 'artist_romaji', 'TEXT');
+  addColumn(d, 'songs', 'title_furigana');
+  addColumn(d, 'songs', 'title_romaji');
+  addColumn(d, 'songs', 'artist_furigana');
+  addColumn(d, 'songs', 'artist_romaji');
 }
 
 /**
@@ -91,7 +120,7 @@ function addTitleAnnotationColumns(d: Database) {
  * meaning and explanation — cached alongside the line's translation.
  */
 function addChunkColumn(d: Database) {
-  addColumn(d, 'line_analysis', 'chunks', "TEXT NOT NULL DEFAULT '[]'");
+  addColumn(d, 'line_analysis', 'chunks');
 }
 
 /**
@@ -101,7 +130,7 @@ function addChunkColumn(d: Database) {
  * the same version but live in createBaseSchema, since they are whole tables.
  */
 function addSongContextColumn(d: Database) {
-  addColumn(d, 'songs', 'context', 'TEXT');
+  addColumn(d, 'songs', 'context');
 }
 
 /**
@@ -110,7 +139,7 @@ function addSongContextColumn(d: Database) {
  * createBaseSchema, since it is a whole table.
  */
 function addFavouriteColumn(d: Database) {
-  addColumn(d, 'songs', 'favourite', 'INTEGER NOT NULL DEFAULT 0');
+  addColumn(d, 'songs', 'favourite');
 }
 
 /**
@@ -122,7 +151,7 @@ function addFavouriteColumn(d: Database) {
  * could never find its own SRS state. Recording the surface closes the gap.
  */
 function addSeenAsColumn(d: Database) {
-  addColumn(d, 'word_songs', 'seen_as', 'TEXT');
+  addColumn(d, 'word_songs', 'seen_as');
 }
 
 function createBaseSchema(d: Database) {

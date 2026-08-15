@@ -106,5 +106,10 @@ export function swapDatabase(opts: {
   }
   opts.reset();
   renameSync(opts.src, opts.path);
+  // A request racing through the window between reset and rename re-creates and
+  // caches a fresh, empty database at `path` (getDb is create-if-missing). That
+  // cached handle is stale the moment the rename lands, so forget it again —
+  // reopen must see the restored file, not the racing request's empty one.
+  opts.reset();
   opts.reopen();
 }
