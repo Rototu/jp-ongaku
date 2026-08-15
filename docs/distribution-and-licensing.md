@@ -22,23 +22,24 @@ free.
 | Call | What it is | Verdict |
 | --- | --- | --- |
 | `youtube.com/oembed` — [`server/lyrics/youtube.ts`](../server/lyrics/youtube.ts) | Official public oEmbed endpoint, no key, built for third parties | Fine |
-| `youtube.com/watch` + `"lengthSeconds"` regex — [`server/lyrics/youtube.ts`](../server/lyrics/youtube.ts) | Scrapes the watch page for the runtime, with a spoofed user agent | ToS breach, no copyright issue |
+| `googleapis.com/youtube/v3` — [`server/lyrics/youtube.ts`](../server/lyrics/youtube.ts) | Official Data API, `videos.list` with `part=contentDetails`, for the runtime | Fine; bring-your-own key, free quota |
 | `lrclib.net/api` — [`server/lyrics/lrclib.ts`](../server/lyrics/lrclib.ts) | Free crowdsourced lyric database, no key, **no publisher licences** | The real exposure |
 | `ai-gateway.vercel.sh` — [`server/llm/provider.ts`](../server/llm/provider.ts) | Hardcoded gateway; lyrics reach a model provider through it | Fine today, wants to be configurable |
 
 No captions are ripped from YouTube anywhere, which is the thing that would have
 been genuinely hard to defend.
 
-### The duration scrape
+### The duration lookup
 
-Runtime is a fact, and facts are not copyrightable, so there is no rights problem
-here at all. What it does breach is YouTube's clause about accessing the service
-by means other than the interface they provide — and the spoofed user agent makes
-that hard to argue was accidental.
+Runtime is a fact, and facts are not copyrightable, so there was never a rights
+problem here. There *was* a terms problem: an earlier version read the length
+from the watch page with a spoofed user agent, which breaches YouTube's clause
+about accessing the service by means other than the interface they provide.
 
-The official replacement is the YouTube Data API, `videos.list` with
-`part=contentDetails`, which returns the duration under a free quota. It needs an
-API key, which fits a bring-your-own-key design anyway.
+That is gone. The length now comes from the official YouTube Data API —
+`videos.list` with `part=contentDetails` — under a free quota, with a
+bring-your-own key stored locally. Without a key, imports still work; the
+candidates are simply ranked without the duration.
 
 ### LRCLIB
 

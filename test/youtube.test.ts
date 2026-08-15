@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import {
   looksLikeYoutube,
+  parseIsoDuration,
   searchCandidates,
   splitTitle,
   videoIdFrom,
@@ -78,6 +79,23 @@ describe('splitting an upload title', () => {
     expect(s.artist).toBe('YOASOBI');
     expect(s.title).toBe('群青');
     expect(s.guessedBy).toBe('channel');
+  });
+});
+
+describe('ISO-8601 durations from the Data API', () => {
+  test('parses the shapes the API returns', () => {
+    expect(parseIsoDuration('PT4M13S')).toBe(253);
+    expect(parseIsoDuration('PT1H2M3S')).toBe(3723);
+    expect(parseIsoDuration('PT30S')).toBe(30);
+    expect(parseIsoDuration('PT58M')).toBe(3480);
+    expect(parseIsoDuration('P1DT1S')).toBe(86_401);
+  });
+
+  test('rejects what is not a duration', () => {
+    expect(parseIsoDuration('')).toBeNull();
+    expect(parseIsoDuration('PT')).toBeNull();
+    expect(parseIsoDuration('4m13s')).toBeNull();
+    expect(parseIsoDuration('PT1M1M')).toBeNull();
   });
 });
 

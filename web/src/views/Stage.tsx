@@ -4,7 +4,9 @@ import { Furigana } from '../components/Furigana';
 import { RubyText } from '../components/RubyText';
 import { clock } from '../components/bits';
 import type { PlayerHandle } from '../components/YouTubePlayer';
-import type { AiChunk, SongLine } from '../../../shared/types';
+import type { SongLine } from '../../../shared/types';
+import { ShadowMeter } from './stage/ShadowMeter';
+import { renderable, lineFurigana } from './stage/pieces';
 
 /**
  * Stage mode — the chrome drops and one line fills the screen.
@@ -23,6 +25,9 @@ import type { AiChunk, SongLine } from '../../../shared/types';
  * Shadowing is a level meter and nothing else: the microphone is read in the
  * browser, never recorded and never sent anywhere. It exists to count the lines
  * you actually sang.
+ *
+ * The shadowing meter lives in ./stage/ShadowMeter, and the line-to-pieces
+ * helpers in ./stage/pieces.
  */
 
 const LOOP_TIMES = 3;
@@ -203,7 +208,7 @@ export function Stage({
   }, [onClose, player, step, start]);
 
   const chunks = useMemo(() => renderable(line), [line]);
-  const hoveredChunk = hovered !== null ? chunks[hovered] : null;
+  const hoveredChunk = hovered === null ? null : chunks[hovered];
 
   /**
    * Every kanji in the shown word, from KANJIDIC2, with its memory hooks.
@@ -386,7 +391,7 @@ export function Stage({
             {hoveredChunk && (
               <div className="paused-pill">
                 <span style={{ width: 7, height: 7, borderRadius: 1, background: 'var(--lime)' }} />
-                {pinned !== null ? 'PINNED — PRESS PLAY WHEN YOU’RE DONE' : 'AUTO-PAUSED — HOVERING A WORD'}
+                {pinned === null ? 'AUTO-PAUSED — HOVERING A WORD' : 'PINNED — PRESS PLAY WHEN YOU’RE DONE'}
               </div>
             )}
 
@@ -490,9 +495,9 @@ export function Stage({
                       ))}
                       <div className="cap" style={{ color: 'var(--sage-deep)' }}>
                         KANJIDIC2 ·{' '}
-                        {pinned !== null
-                          ? 'PINNED — PRESS PLAY TO CARRY ON'
-                          : 'CLICK TO PIN · MOVE OFF TO RESUME'}
+                        {pinned === null
+                          ? 'CLICK TO PIN · MOVE OFF TO RESUME'
+                          : 'PINNED — PRESS PLAY TO CARRY ON'}
                       </div>
                     </div>
                   </>
@@ -604,164 +609,3 @@ export function Stage({
     </div>
   );
 }
-
-/**
- * The microphone level, and how many lines you sang over.
- *
- * Off until asked for. When on, audio never leaves the AnalyserNode: no
- * recording is kept, nothing is uploaded, and the only thing derived from it is
- * "was there sound while this line was on screen".
- */
-function ShadowMeter({ activeLineIdx, playing }: { activeLineIdx: number; playing: boolean }) {
-  const [on, setOn] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [levels, setLevels] = useState<number[]>([0, 0, 0, 0, 0, 0]);
-  const [sung, setSung] = useState<Set<number>>(new Set());
-  const [heard, setHeard] = useState(0);
-  const lineRef = useRef(activeLineIdx);
-  lineRef.current = activeLineIdx;
-  const playingRef = useRef(playing);
-  playingRef.current = playing;
-
-  useEffect(() => {
-    if (!on) return;
-    let stream: MediaStream | null = null;
-    let ctx: AudioContext | null = null;
-    let raf = 0;
-    let cancelled = false;
-
-    void navigator.mediaDevices
-      ?.getUserMedia({ audio: true })
-      .then((granted) => {
-        if (cancelled) {
-          granted.getTracks().forEach((t) => t.stop());
-          return;
-        }
-        stream = granted;
-        ctx = new AudioContext();
-        const source = ctx.createMediaStreamSource(granted);
-        const analyser = ctx.createAnalyser();
-        analyser.fftSize = 256;
-        source.connect(analyser);
-        const data = new Uint8Array(analyser.frequencyBinCount);
-
-        const tick = () => {
-          analyser.getByteFrequencyData(data);
-          const band = Math.floor(data.length / 6);
-          const next: number[] = [];
-          let peak = 0;
-          for (let b = 0; b < 6; b++) {
-            let sum = 0;
-            for (let i = b * band; i < (b + 1) * band; i++) sum += data[i];
-            const value = sum / band / 255;
-            peak = Math.max(peak, value);
-            next.push(value);
-          }
-          setLevels(next);
-          setHeard(peak);
-          // A line counts as sung once there was real signal while it was up.
-          if (peak > 0.16 && playingRef.current) {
-            const at = lineRef.current;
-            setSung((prev) => (prev.has(at) ? prev : new Set(prev).add(at)));
-          }
-          raf = requestAnimationFrame(tick);
-        };
-        tick();
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setError('No microphone — shadowing needs one.');
-          setOn(false);
-        }
-      });
-
-    return () => {
-      cancelled = true;
-      cancelAnimationFrame(raf);
-      stream?.getTracks().forEach((t) => t.stop());
-      void ctx?.close();
-    };
-  }, [on]);
-
-  if (!on) {
-    return (
-      <button className="stage-btn" onClick={() => setOn(true)} title={error ?? undefined}>
-        🎤 {error ? 'Shadowing unavailable' : 'Shadow'}
-      </button>
-    );
-  }
-
-  return (
-    <div className="shadow-meter" style={{ margin: 0 }}>
-      <div className="inner">
-        <span className="cap" style={{ color: 'var(--lime)' }}>
-          Shadowing
-        </span>
-        <div className="eq">
-          {levels.map((level, i) => (
-            <span
-              key={i}
-              style={{
-                height: `${Math.max(12, level * 100)}%`,
-                background: level > 0.4 ? 'var(--lime)' : 'var(--leaf)',
-              }}
-            />
-          ))}
-        </div>
-        <span style={{ fontSize: 13, color: 'var(--sage)' }}>
-          {sung.size > 0
-            ? `you sang ${sung.size} line${sung.size === 1 ? '' : 's'}${heard > 0.5 ? ' · loud' : ''}`
-            : 'sing — nothing is recorded'}
-        </span>
-        <button className="stage-btn" onClick={() => setOn(false)}>
-          Stop
-        </button>
-      </div>
-    </div>
-  );
-}
-
-/** One renderable piece of a line: AI chunks when they exist, tokens otherwise. */
-interface StagePiece {
-  text: string;
-  romaji: string;
-  furigana: { text: string; ruby: string }[];
-  role: string;
-  meaning: string;
-  explanation: string;
-}
-
-function renderable(line: SongLine | null): StagePiece[] {
-  if (!line) return [];
-  const chunks = line.analysis?.chunks ?? [];
-  if (chunks.length > 0) {
-    return chunks.map((chunk: AiChunk) => ({
-      text: chunk.text,
-      romaji: chunk.romaji,
-      furigana: chunk.furigana.length > 0 ? chunk.furigana : [{ text: chunk.text, ruby: '' }],
-      role: chunk.role,
-      meaning: chunk.meaning,
-      explanation: chunk.explanation,
-    }));
-  }
-  return line.tokens
-    .filter((token) => !token.filler)
-    .map((token) => ({
-      text: token.surface,
-      romaji: token.romaji,
-      furigana: token.furigana.length > 0 ? token.furigana : [{ text: token.surface, ruby: '' }],
-      role: token.pos,
-      meaning: token.entry?.senses[0]?.glosses.slice(0, 2).join('; ') ?? '',
-      explanation: '',
-    }));
-}
-
-function lineFurigana(line: SongLine | undefined): { text: string; ruby: string }[] {
-  if (!line) return [];
-  const chunks = line.analysis?.chunks ?? [];
-  if (chunks.length > 0) return chunks.flatMap((c) => c.furigana);
-  return line.tokens.flatMap((t) =>
-    t.furigana.length > 0 ? t.furigana : [{ text: t.surface, ruby: '' }],
-  );
-}
-

@@ -1,9 +1,12 @@
 import { Hono } from 'hono';
-import { getDb, getSetting, nowIso, setSetting } from '../db';
+import { readFileSync, unlinkSync, writeFileSync } from 'node:fs';
+import { getDb, getSetting, nowIso, setSetting, closeDb, SCHEMA_VERSION } from '../db';
+import { snapshotDatabase, swapDatabase, validateDatabase } from '../backup';
+import { DATA_DIR, USER_DB } from '../paths';
 import { dict } from '../dict';
 import * as lrclib from '../lyrics/lrclib';
 import * as youtube from '../lyrics/youtube';
-import { parseLrc, parsePlain, groupVerses } from '../lyrics/lrc';
+import { parseLrc, parsePlain } from '../lyrics/lrc';
 import { buildLesson } from '../lesson/build';
 import { seedKatakanaDeck, katakanaDeckSize } from '../lesson/kana-deck';
 import { annotate, annotateWithReading } from '../lesson/titles';
@@ -119,7 +122,8 @@ api.get('/search', async (c) => {
  * A YouTube link, turned into a song to import.
  *
  * The user pastes what they are listening to. The video's own title and channel
- * name give the song and the performer, the watch page gives its length, and the
+ * name give the song and the performer, the Data API gives its length when a
+ * key is configured, and the
  * lyric candidates come back ranked against that length — so the full song sorts
  * above the TV-size edit without the user having to know which is which.
  */
@@ -129,7 +133,7 @@ api.get('/youtube/resolve', async (c) => {
 
   let video: youtube.YoutubeMeta;
   try {
-    video = await youtube.resolve(url);
+    video = await youtube.resolve(url, { apiKey: youtubeApiKey() });
   } catch (err) {
     const status = err instanceof youtube.NotAVideo ? 400 : 502;
     return c.json(
@@ -357,8 +361,8 @@ api.get('/songs/:id', (c) => {
         ? {
             translation: r.translation,
             literal: r.literal,
-            notes: r.notes ? (JSON.parse(r.notes) as GrammarNote[]) : [],
-            chunks: r.chunks ? (JSON.parse(r.chunks) as AiChunk[]) : [],
+            notes: r.notes ? parseCached<GrammarNote[]>(r.notes, []) : [],
+            chunks: r.chunks ? parseCached<AiChunk[]>(r.chunks, []) : [],
             provider: r.provider,
           }
         : undefined;
@@ -368,7 +372,7 @@ api.get('/songs/:id', (c) => {
       text: r.text,
       timeMs: r.time_ms,
       verseIdx: r.verse_idx,
-      tokens: JSON.parse(r.tokens) as AnalyzedToken[],
+      tokens: parseCached<AnalyzedToken[]>(r.tokens, []),
       analysis,
     };
   });
@@ -406,6 +410,20 @@ api.delete('/songs/:id', (c) => {
   return c.json({ deleted: res.changes > 0 });
 });
 
+/**
+ * Literal SQL per reading-override field: identifiers are never interpolated.
+ * `field` comes from the `as const` tuple below, so these are the only two.
+ */
+const READING_SELECT = {
+  title: 'SELECT title AS text FROM songs WHERE id = ?',
+  artist: 'SELECT artist AS text FROM songs WHERE id = ?',
+} as const;
+
+const READING_UPDATE = {
+  title: 'UPDATE songs SET title_furigana = ?, title_romaji = ? WHERE id = ?',
+  artist: 'UPDATE songs SET artist_furigana = ?, artist_romaji = ? WHERE id = ?',
+} as const;
+
 api.patch('/songs/:id', async (c) => {
   const id = Number(c.req.param('id'));
   const body = await c.req.json<{
@@ -434,28 +452,31 @@ api.patch('/songs/:id', async (c) => {
   }
 
   // Reading overrides: the automatic guess is wrong for most coined titles.
+  // Identifiers are never interpolated: each field has its own literal SQL.
   for (const [field, value] of [
     ['title', body.titleReading],
     ['artist', body.artistReading],
   ] as const) {
     if (value === undefined) continue;
     const row = db
-      .query<{ text: string }, [number]>(`SELECT ${field} AS text FROM songs WHERE id = ?`)
+      .query<{ text: string }, [number]>(READING_SELECT[field])
       .get(id);
     if (!row) return c.json({ error: 'song not found' }, 404);
 
     if (!value.trim()) {
       // Cleared: fall back to the automatic annotation.
       const auto = await annotate(row.text);
-      db.prepare(
-        `UPDATE songs SET ${field}_furigana = ?, ${field}_romaji = ? WHERE id = ?`,
-      ).run(auto ? JSON.stringify(auto.furigana) : null, auto ? auto.romaji : '', id);
+      db.prepare(READING_UPDATE[field]).run(
+        auto ? JSON.stringify(auto.furigana) : null,
+        auto ? auto.romaji : '',
+        id,
+      );
       continue;
     }
 
     const applied = annotateWithReading(row.text, value);
     if (!applied) return c.json({ error: `Could not read "${value}" as a reading` }, 400);
-    db.prepare(`UPDATE songs SET ${field}_furigana = ?, ${field}_romaji = ? WHERE id = ?`).run(
+    db.prepare(READING_UPDATE[field]).run(
       JSON.stringify(applied.furigana),
       applied.romaji,
       id,
@@ -636,8 +657,8 @@ api.get('/songs/:id/words', (c) => {
       lemma: r.lemma,
       reading: r.reading,
       romaji: r.romaji,
-      furigana: JSON.parse(r.furigana),
-      glosses: JSON.parse(r.glosses),
+      furigana: parseCached(r.furigana, []),
+      glosses: parseCached(r.glosses, []),
       jlpt: r.jlpt,
       priority: r.priority,
       loanword: r.loanword === 1,
@@ -1140,6 +1161,23 @@ api.post('/kana/seed', (c) => c.json(seedKatakanaDeck()));
 
 // --- settings ---------------------------------------------------------------
 
+/** A cached JSON column this server wrote itself; a bad row degrades, not 500s. */
+function parseCached<T>(text: string, fallback: T): T {
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    return fallback;
+  }
+}
+
+/**
+ * Data API key for video durations: the settings table first, the environment
+ * as a bootstrap fallback. Null means imports run without length ranking.
+ */
+function youtubeApiKey(): string | null {
+  return getSetting('youtube_api_key') ?? process.env.YOUTUBE_API_KEY ?? null;
+}
+
 const EXPOSED_SETTINGS = [
   'llm_provider',
   'gateway_model',
@@ -1155,15 +1193,16 @@ const EXPOSED_SETTINGS = [
 api.get('/settings', (c) => {
   const out: Record<string, string | null> = {};
   for (const k of EXPOSED_SETTINGS) out[k] = getSetting(k);
-  // Never send the key back to the client; report only whether one is set.
+  // Never send either key back to the client; report only whether one is set.
   out.gateway_api_key_set = getSetting('gateway_api_key') ? 'yes' : 'no';
+  out.youtube_api_key_set = getSetting('youtube_api_key') ? 'yes' : 'no';
   return c.json({ settings: out, llm: llmStatus() });
 });
 
 api.put('/settings', async (c) => {
   const body = await c.req.json<Record<string, string | null>>();
   for (const [k, v] of Object.entries(body)) {
-    if (![...EXPOSED_SETTINGS, 'gateway_api_key'].includes(k)) continue;
+    if (![...EXPOSED_SETTINGS, 'gateway_api_key', 'youtube_api_key'].includes(k)) continue;
     if (v === null || v === '') {
       getDb().prepare('DELETE FROM settings WHERE k = ?').run(k);
     } else {
@@ -1171,4 +1210,72 @@ api.put('/settings', async (c) => {
     }
   }
   return c.json({ ok: true, llm: llmStatus() });
+});
+
+// --- backup -----------------------------------------------------------------
+
+/**
+ * The whole user database as one file, checkpointed out of WAL. Designed to be
+ * small — this is the file the README says you can copy by hand; the endpoint
+ * exists so the browser can do it for you.
+ */
+api.get('/backup', (_c) => {
+  const tmp = `${USER_DB}.snapshot-${process.pid}`;
+  snapshotDatabase(getDb(), USER_DB, tmp);
+  const bytes = readFileSync(tmp);
+  try {
+    unlinkSync(tmp);
+  } catch {
+    /* best effort cleanup */
+  }
+  const now = new Date().toISOString().replace(/[-:T]/g, '');
+  const stamp = `${now.slice(0, 8)}-${now.slice(8, 14)}`; // YYYYMMDD-HHMMSS
+  return new Response(new Uint8Array(bytes), {
+    headers: {
+      'Content-Type': 'application/x-sqlite3',
+      'Content-Disposition': `attachment; filename="ongaku-${stamp}.db"`,
+    },
+  });
+});
+
+/**
+ * Replaces the user database with an uploaded backup.
+ *
+ * Validated before anything is touched: a non-database or a schema from a
+ * newer app is refused with 422 and the running database is unchanged. Older
+ * schemas restore fine — migrations are idempotent and run at reopen.
+ */
+api.post('/backup/restore', async (c) => {
+  const bytes = new Uint8Array(await c.req.arrayBuffer());
+  if (bytes.byteLength === 0) return c.json({ error: 'no file received' }, 400);
+  if (bytes.byteLength > 1_000_000_000) {
+    return c.json({ error: 'that file is implausibly large for a backup' }, 400);
+  }
+
+  // Staged next to the real file so the final swap is a same-filesystem rename.
+  const staged = `${DATA_DIR}/ongaku-restore-${process.pid}-${Date.now()}.db`;
+  writeFileSync(staged, bytes);
+
+  const verdict = validateDatabase(staged, SCHEMA_VERSION);
+  if (!verdict.ok) {
+    try {
+      unlinkSync(staged);
+    } catch {
+      /* best effort cleanup */
+    }
+    return c.json({ error: verdict.error }, 422);
+  }
+
+  try {
+    swapDatabase({ src: staged, path: USER_DB, reset: closeDb, reopen: getDb });
+  } catch (err) {
+    return c.json({ error: err instanceof Error ? err.message : 'restore failed' }, 500);
+  }
+
+  const counts = getDb()
+    .query<{ songs: number; cards: number }, []>(
+      'SELECT (SELECT COUNT(*) FROM songs) AS songs, (SELECT COUNT(*) FROM cards) AS cards',
+    )
+    .get();
+  return c.json({ ok: true, version: verdict.version, ...counts });
 });

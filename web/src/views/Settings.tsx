@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { api } from '../lib/api';
 import { useAsync } from '../lib/useAsync';
 
@@ -15,6 +15,11 @@ export function Settings() {
   const [effort, setEffort] = useState('none');
   const [concurrency, setConcurrency] = useState('4');
   const [lyricReadings, setLyricReadings] = useState('ai');
+  const [youtubeKey, setYoutubeKey] = useState('');
+  const [restoreArmed, setRestoreArmed] = useState(false);
+  const [restoreBusy, setRestoreBusy] = useState(false);
+  const [restoreMsg, setRestoreMsg] = useState<string | null>(null);
+  const restoreInput = useRef<HTMLInputElement | null>(null);
   const [saved, setSaved] = useState<string | null>(null);
 
   useEffect(() => {
@@ -36,14 +41,17 @@ export function Settings() {
       lyric_readings: lyricReadings || null,
     };
     if (gatewayKey.trim()) body.gateway_api_key = gatewayKey.trim();
+    if (youtubeKey.trim()) body.youtube_api_key = youtubeKey.trim();
     const res = await api.saveSettings(body);
     setGatewayKey('');
+    setYoutubeKey('');
     setSaved(res.llm.detail);
     settings.reload();
     health.reload();
   };
 
   const keySet = settings.data?.settings.gateway_api_key_set === 'yes';
+  const youtubeKeySet = settings.data?.settings.youtube_api_key_set === 'yes';
 
   return (
     <>
@@ -170,6 +178,32 @@ export function Settings() {
         </div>
       </div>
 
+      <h2>Video lengths</h2>
+      <div className="card stack">
+        <p className="muted" style={{ marginTop: 0 }}>
+          Importing by YouTube link works without any key — the title and channel still name the
+          song. A <b>YouTube Data API</b> key adds the video's exact length, so lyric candidates
+          rank by how close their timings are to your recording: the full song sorts above the
+          TV-size edit. Free quota; one key, no other scopes needed.
+        </p>
+        <label>
+          <div className="faint" style={{ fontSize: '0.78rem', marginBottom: '0.25rem' }}>
+            YouTube Data API key {youtubeKeySet && <span className="tag new">one is stored</span>}
+          </div>
+          <input
+            type="password"
+            value={youtubeKey}
+            onChange={(e) => setYoutubeKey(e.target.value)}
+            placeholder={youtubeKeySet ? 'Stored — type to replace' : 'AIza…'}
+            autoComplete="off"
+          />
+          <div className="faint" style={{ fontSize: '0.76rem', marginTop: '0.3rem' }}>
+            From Google Cloud Console → APIs &amp; Services → Credentials, with the YouTube Data
+            API v3 enabled. Without it, imports rank candidates without the length.
+          </div>
+        </label>
+      </div>
+
       <h2>Local data</h2>
       <div className="card">
         {health.data && (
@@ -188,8 +222,75 @@ export function Settings() {
               )}
             </li>
             <li>
-              Your songs, cards and history: <code className="mono">data/ongaku.db</code>. Copy that
-              one file to back everything up.
+              Your songs, cards and history: <code className="mono">data/ongaku.db</code>. One
+              file — download it below, or copy it by hand.
+              <div className="row" style={{ marginTop: 8, gap: 8, flexWrap: 'wrap' }}>
+                <a className="dark small" href={api.backupUrl} download>
+                  ⤓ Download backup
+                </a>
+                {restoreArmed ? (
+                  <>
+                    <button
+                      className="primary small"
+                      disabled={restoreBusy}
+                      onClick={() => restoreInput.current?.click()}
+                    >
+                      {restoreBusy ? 'Restoring…' : 'Pick the backup file'}
+                    </button>
+                    <button
+                      className="ghost small"
+                      disabled={restoreBusy}
+                      onClick={() => setRestoreArmed(false)}
+                    >
+                      Cancel
+                    </button>
+                  </>
+                ) : (
+                  <button
+                    className="ghost small"
+                    onClick={() => {
+                      setRestoreMsg(null);
+                      setRestoreArmed(true);
+                    }}
+                  >
+                    ⟳ Restore from backup…
+                  </button>
+                )}
+                <input
+                  ref={restoreInput}
+                  type="file"
+                  accept=".db,application/x-sqlite3,application/octet-stream"
+                  hidden
+                  onChange={async (e) => {
+                    const file = e.target.files?.[0];
+                    e.target.value = '';
+                    if (!file) return;
+                    setRestoreBusy(true);
+                    setRestoreMsg(null);
+                    try {
+                      const res = await api.restoreBackup(file);
+                      setRestoreMsg(
+                        `Restored — ${res.songs} song${res.songs === 1 ? '' : 's'}, ${res.cards} card${res.cards === 1 ? '' : 's'} (schema v${res.version}).`,
+                      );
+                      settings.reload();
+                      health.reload();
+                    } catch (err) {
+                      setRestoreMsg(err instanceof Error ? err.message : 'Restore failed');
+                    } finally {
+                      setRestoreBusy(false);
+                      setRestoreArmed(false);
+                    }
+                  }}
+                />
+              </div>
+              {restoreMsg && (
+                <div
+                  className={restoreMsg.startsWith('Restored') ? 'notice' : 'error'}
+                  style={{ marginTop: 8 }}
+                >
+                  {restoreMsg}
+                </div>
+              )}
             </li>
             <li>
               A word enters your review deck automatically at priority{' '}
