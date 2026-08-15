@@ -443,7 +443,7 @@ function materialize(
           'vocab',
           `vocab:${row.id}`,
           {
-            prompt: 'What does this word mean?',
+            prompt: 'How do you read this word?',
             jp: entry.headword,
             furigana: lemmaFurigana,
             romaji: lemmaRomaji,
@@ -543,7 +543,7 @@ function materialize(
     const timeMs = input.lines[lineIdx].timeMs;
     const nextTime = input.lines[lineIdx + 1]?.timeMs ?? null;
     if (input.youtubeId && timeMs !== null) {
-      const endMs = nextTime !== null ? nextTime : timeMs + 6000;
+      const endMs = nextTime === null ? timeMs + 6000 : nextTime;
       addCard(
         'listening',
         `listening:${lineId}`,

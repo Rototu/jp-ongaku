@@ -3053,8 +3053,7 @@ rt {
 }
 
 .review-body {
-  flex: 1;
-  padding: 26px;
+  flex: 1;  padding: 26px;
   display: flex;
   flex-direction: column;
   gap: 16px;
@@ -3355,6 +3354,73 @@ rt {
 
 .meaning-grid button:disabled {
   opacity: 0.55;
+}
+
+/* ── typed reading answers ─────────────────────────────────────────────── */
+
+.typed-row {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  max-width: 420px;
+  margin: 0 auto;
+}
+
+.typed-row input {
+  text-align: center;
+  font-size: 26px;
+  padding: 12px 16px;
+}
+
+.typed-row .typed-preview {
+  font-size: 15px;
+  color: var(--faint);
+  min-height: 1.4em;
+}
+
+.diff-strip {
+  max-width: 480px;
+  margin: 14px auto 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  background: var(--paper);
+  border: 2px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: 12px 16px;
+}
+
+.diff-strip .verdict {
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+}
+
+.diff-strip .verdict .good {
+  color: var(--leaf);
+}
+
+.diff-strip .verdict .miss {
+  color: var(--coral);
+}
+
+.diff-strip .diff {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  font-size: 24px;
+}
+
+.diff-strip .diff .cap {
+  flex: 0 0 76px;
+}
+
+.diff-strip .diff .wrong {
+  color: var(--coral);
+  text-decoration: underline wavy var(--coral) 2px;
+  text-underline-offset: 5px;
 }
 
 .grade-row {

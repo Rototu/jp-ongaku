@@ -15,6 +15,15 @@ import type {
   TroubleCluster,
 } from '../../shared/types';
 
+/** A cached JSON column this server wrote itself; a bad row degrades, not 500s. */
+function parseCached<T>(text: string, fallback: T): T {
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    return fallback;
+  }
+}
+
 interface CardRow {
   id: number;
   kind: string;
@@ -52,13 +61,13 @@ const CARD_FROM = `
 const SELECT_CARD = `SELECT ${CARD_COLUMNS} ${CARD_FROM}`;
 
 function hydrate(row: CardRow): Card {
-  const back = JSON.parse(row.back) as CardBack;
+  const back = parseCached<CardBack>(row.back, {} as CardBack);
   return {
     id: row.id,
     kind: row.kind as CardKind,
     songId: row.song_id,
     songTitle: row.song_title,
-    front: JSON.parse(row.front) as CardFront,
+    front: parseCached<CardFront>(row.front, {} as CardFront),
     back: { ...back, mnemonic: row.mnemonic },
     srs: {
       ease: row.ease,
@@ -563,7 +572,7 @@ export function troubleLines(songId?: number, limit = 20): TroubleLine[] {
   return rows.map((r) => {
     // The line's tokens are already stored, so its ruby and romaji come for
     // free rather than needing the tokenizer again.
-    const tokens = JSON.parse(r.tokens) as AnalyzedToken[];
+    const tokens = parseCached<AnalyzedToken[]>(r.tokens, []);
     return {
       lineId: r.line_id,
       songId: r.song_id,
@@ -606,7 +615,7 @@ export function mistakePatterns(): MistakePattern[] {
       .all(...slice);
     return rows.map((r) => ({
       text: r.text,
-      romaji: lineRomaji(JSON.parse(r.tokens) as AnalyzedToken[]),
+      romaji: lineRomaji(parseCached<AnalyzedToken[]>(r.tokens, [])),
     }));
   };
 
@@ -763,11 +772,11 @@ export function enrollWord(wordId: number): Card | null {
     .get(wordId);
   if (!word) return null;
 
-  const glosses = JSON.parse(word.glosses) as string[];
+  const glosses = parseCached<string[]>(word.glosses, []);
   const front: CardFront = {
-    prompt: 'What does this word mean?',
+    prompt: 'How do you read this word?',
     jp: word.lemma,
-    furigana: JSON.parse(word.furigana),
+    furigana: parseCached<FuriganaSegment[]>(word.furigana, []),
     romaji: word.romaji,
   };
   const back: CardBack = {
@@ -933,7 +942,9 @@ export function songMap(): SongMapRow[] {
     return {
       songId: s.id,
       title: s.title,
-      titleFurigana: s.title_furigana ? (JSON.parse(s.title_furigana) as FuriganaSegment[]) : null,
+      titleFurigana: s.title_furigana
+        ? parseCached<FuriganaSegment[]>(s.title_furigana, [])
+        : null,
       artist: s.artist,
       lineCount: cells.length,
       cells,
@@ -1014,8 +1025,8 @@ export function troubleClusters(limit = 6): TroubleCluster[] {
   const answerOf = new Map<number, string>();
   const shownOf = new Map<number, string>();
   for (const r of rows) {
-    const answer = (JSON.parse(r.back) as CardBack).answer;
-    const front = JSON.parse(r.front) as CardFront;
+    const answer = parseCached<CardBack>(r.back, {} as CardBack).answer;
+    const front = parseCached<CardFront>(r.front, {} as CardFront);
     answerOf.set(r.id, answer);
     shownOf.set(r.id, front.jp && front.jp.length <= 12 ? front.jp : answer);
   }
@@ -1066,5 +1077,3 @@ export function troubleClusters(limit = 6): TroubleCluster[] {
 
   return clusters;
 }
-
-export { LEECH_THRESHOLD, MATURE_DAYS };
