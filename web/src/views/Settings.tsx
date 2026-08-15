@@ -15,6 +15,7 @@ export function Settings() {
   const [effort, setEffort] = useState('none');
   const [concurrency, setConcurrency] = useState('4');
   const [lyricReadings, setLyricReadings] = useState('ai');
+  const [youtubeKey, setYoutubeKey] = useState('');
   const [saved, setSaved] = useState<string | null>(null);
 
   useEffect(() => {
@@ -36,14 +37,17 @@ export function Settings() {
       lyric_readings: lyricReadings || null,
     };
     if (gatewayKey.trim()) body.gateway_api_key = gatewayKey.trim();
+    if (youtubeKey.trim()) body.youtube_api_key = youtubeKey.trim();
     const res = await api.saveSettings(body);
     setGatewayKey('');
+    setYoutubeKey('');
     setSaved(res.llm.detail);
     settings.reload();
     health.reload();
   };
 
   const keySet = settings.data?.settings.gateway_api_key_set === 'yes';
+  const youtubeKeySet = settings.data?.settings.youtube_api_key_set === 'yes';
 
   return (
     <>
@@ -168,6 +172,32 @@ export function Settings() {
           </button>
           {saved && <span className="muted">{saved}</span>}
         </div>
+      </div>
+
+      <h2>Video lengths</h2>
+      <div className="card stack">
+        <p className="muted" style={{ marginTop: 0 }}>
+          Importing by YouTube link works without any key — the title and channel still name the
+          song. A <b>YouTube Data API</b> key adds the video's exact length, so lyric candidates
+          rank by how close their timings are to your recording: the full song sorts above the
+          TV-size edit. Free quota; one key, no other scopes needed.
+        </p>
+        <label>
+          <div className="faint" style={{ fontSize: '0.78rem', marginBottom: '0.25rem' }}>
+            YouTube Data API key {youtubeKeySet && <span className="tag new">one is stored</span>}
+          </div>
+          <input
+            type="password"
+            value={youtubeKey}
+            onChange={(e) => setYoutubeKey(e.target.value)}
+            placeholder={youtubeKeySet ? 'Stored — type to replace' : 'AIza…'}
+            autoComplete="off"
+          />
+          <div className="faint" style={{ fontSize: '0.76rem', marginTop: '0.3rem' }}>
+            From Google Cloud Console → APIs &amp; Services → Credentials, with the YouTube Data
+            API v3 enabled. Without it, imports rank candidates without the length.
+          </div>
+        </label>
       </div>
 
       <h2>Local data</h2>

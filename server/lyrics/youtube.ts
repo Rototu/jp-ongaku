@@ -1,13 +1,14 @@
 import { LlmUnavailable, complete, extractJson } from '../llm/provider';
 
 /**
- * What a YouTube link can tell us about a song, without an API key.
+ * What a YouTube link can tell us about a song.
  *
  * oEmbed is YouTube's own public endpoint for exactly this — title, channel and
  * thumbnail for a public video, no key, no scraping. It carries no duration, so
- * the length is read from the watch page as a best effort: knowing it lets the
- * lyric candidates be ranked by how close their timings are to the recording the
- * user is actually going to play along with.
+ * the length comes from the official YouTube Data API when a key is configured:
+ * knowing it lets the lyric candidates be ranked by how close their timings are
+ * to the recording the user is actually going to play along with. Without a key
+ * everything else works and the ranking simply goes without it.
  */
 
 const OEMBED = 'https://www.youtube.com/oembed';
@@ -19,7 +20,7 @@ export interface YoutubeMeta {
   /** The video's title, as uploaded. */
   rawTitle: string;
   channel: string;
-  /** From the watch page; null when it could not be read. */
+  /** From the Data API; null without a key or when it could not be read. */
   durationSec: number | null;
   thumbnailUrl: string | null;
   /** Best guess at the song title, with upload noise removed. */
@@ -325,18 +326,32 @@ interface OembedResponse {
   thumbnail_url?: string;
 }
 
-/** Runtime in seconds, read from the watch page. Null when the page won't say. */
-async function durationOf(videoId: string): Promise<number | null> {
+/**
+ * ISO-8601 duration, as the Data API reports it — "PT4M13S", "PT1H2M3S",
+ * "P1DT3H" for the very long ones — in seconds. Null for anything else.
+ */
+export function parseIsoDuration(iso: string): number | null {
+  const m = /^P(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?)?$/.exec(iso.trim());
+  if (!m) return null;
+  const [, d, h, min, s] = m;
+  if (d === undefined && h === undefined && min === undefined && s === undefined) return null;
+  return Number(d ?? 0) * 86_400 + Number(h ?? 0) * 3_600 + Number(min ?? 0) * 60 + Number(s ?? 0);
+}
+
+/** Runtime in seconds from the Data API. Null without a key or on any failure. */
+async function durationOf(videoId: string, apiKey: string): Promise<number | null> {
   try {
-    const res = await fetch(`https://www.youtube.com/watch?v=${videoId}`, {
-      headers: { 'User-Agent': UA, 'Accept-Language': 'en' },
-      signal: AbortSignal.timeout(TIMEOUT_MS),
-    });
+    const res = await fetch(
+      `https://www.googleapis.com/youtube/v3/videos?part=contentDetails` +
+        `&id=${encodeURIComponent(videoId)}&key=${encodeURIComponent(apiKey)}`,
+      { headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(TIMEOUT_MS) },
+    );
     if (!res.ok) return null;
-    const html = await res.text();
-    const m = /"lengthSeconds":"(\d+)"/.exec(html);
-    const seconds = m ? Number(m[1]) : NaN;
-    return Number.isFinite(seconds) && seconds > 0 ? seconds : null;
+    const body = (await res.json()) as {
+      items?: { contentDetails?: { duration?: string } }[];
+    };
+    const iso = body.items?.[0]?.contentDetails?.duration;
+    return iso ? parseIsoDuration(iso) : null;
   } catch {
     // Best effort only: without it the candidates are ranked without duration.
     return null;
@@ -349,8 +364,14 @@ async function durationOf(videoId: string): Promise<number | null> {
  * The AI refinement is attempted only where the deterministic split gave up
  * (no separator, no quotes), so a working import never waits on a model call it
  * does not need.
+ *
+ * `apiKey`, when given, unlocks the duration lookup; without it the resolve is
+ * still complete except for `durationSec`.
  */
-export async function resolve(input: string): Promise<YoutubeMeta> {
+export async function resolve(
+  input: string,
+  opts: { apiKey?: string | null } = {},
+): Promise<YoutubeMeta> {
   const videoId = videoIdFrom(input);
   if (!videoId) throw new NotAVideo();
 
@@ -381,7 +402,7 @@ export async function resolve(input: string): Promise<YoutubeMeta> {
         ? { title: refined.title, artist: refined.artist || guess.artist, guessedBy: 'ai' as const }
         : guess;
     })(),
-    durationOf(videoId),
+    opts.apiKey ? durationOf(videoId, opts.apiKey) : null,
   ]);
 
   return {

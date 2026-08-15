@@ -3,7 +3,7 @@ import { getDb, getSetting, nowIso, setSetting } from '../db';
 import { dict } from '../dict';
 import * as lrclib from '../lyrics/lrclib';
 import * as youtube from '../lyrics/youtube';
-import { parseLrc, parsePlain, groupVerses } from '../lyrics/lrc';
+import { parseLrc, parsePlain } from '../lyrics/lrc';
 import { buildLesson } from '../lesson/build';
 import { seedKatakanaDeck, katakanaDeckSize } from '../lesson/kana-deck';
 import { annotate, annotateWithReading } from '../lesson/titles';
@@ -119,7 +119,8 @@ api.get('/search', async (c) => {
  * A YouTube link, turned into a song to import.
  *
  * The user pastes what they are listening to. The video's own title and channel
- * name give the song and the performer, the watch page gives its length, and the
+ * name give the song and the performer, the Data API gives its length when a
+ * key is configured, and the
  * lyric candidates come back ranked against that length — so the full song sorts
  * above the TV-size edit without the user having to know which is which.
  */
@@ -129,7 +130,7 @@ api.get('/youtube/resolve', async (c) => {
 
   let video: youtube.YoutubeMeta;
   try {
-    video = await youtube.resolve(url);
+    video = await youtube.resolve(url, { apiKey: youtubeApiKey() });
   } catch (err) {
     const status = err instanceof youtube.NotAVideo ? 400 : 502;
     return c.json(
@@ -357,8 +358,8 @@ api.get('/songs/:id', (c) => {
         ? {
             translation: r.translation,
             literal: r.literal,
-            notes: r.notes ? (JSON.parse(r.notes) as GrammarNote[]) : [],
-            chunks: r.chunks ? (JSON.parse(r.chunks) as AiChunk[]) : [],
+            notes: r.notes ? parseCached<GrammarNote[]>(r.notes, []) : [],
+            chunks: r.chunks ? parseCached<AiChunk[]>(r.chunks, []) : [],
             provider: r.provider,
           }
         : undefined;
@@ -368,7 +369,7 @@ api.get('/songs/:id', (c) => {
       text: r.text,
       timeMs: r.time_ms,
       verseIdx: r.verse_idx,
-      tokens: JSON.parse(r.tokens) as AnalyzedToken[],
+      tokens: parseCached<AnalyzedToken[]>(r.tokens, []),
       analysis,
     };
   });
@@ -636,8 +637,8 @@ api.get('/songs/:id/words', (c) => {
       lemma: r.lemma,
       reading: r.reading,
       romaji: r.romaji,
-      furigana: JSON.parse(r.furigana),
-      glosses: JSON.parse(r.glosses),
+      furigana: parseCached(r.furigana, []),
+      glosses: parseCached(r.glosses, []),
       jlpt: r.jlpt,
       priority: r.priority,
       loanword: r.loanword === 1,
@@ -1140,6 +1141,23 @@ api.post('/kana/seed', (c) => c.json(seedKatakanaDeck()));
 
 // --- settings ---------------------------------------------------------------
 
+/** A cached JSON column this server wrote itself; a bad row degrades, not 500s. */
+function parseCached<T>(text: string, fallback: T): T {
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    return fallback;
+  }
+}
+
+/**
+ * Data API key for video durations: the settings table first, the environment
+ * as a bootstrap fallback. Null means imports run without length ranking.
+ */
+function youtubeApiKey(): string | null {
+  return getSetting('youtube_api_key') ?? process.env.YOUTUBE_API_KEY ?? null;
+}
+
 const EXPOSED_SETTINGS = [
   'llm_provider',
   'gateway_model',
@@ -1155,15 +1173,16 @@ const EXPOSED_SETTINGS = [
 api.get('/settings', (c) => {
   const out: Record<string, string | null> = {};
   for (const k of EXPOSED_SETTINGS) out[k] = getSetting(k);
-  // Never send the key back to the client; report only whether one is set.
+  // Never send either key back to the client; report only whether one is set.
   out.gateway_api_key_set = getSetting('gateway_api_key') ? 'yes' : 'no';
+  out.youtube_api_key_set = getSetting('youtube_api_key') ? 'yes' : 'no';
   return c.json({ settings: out, llm: llmStatus() });
 });
 
 api.put('/settings', async (c) => {
   const body = await c.req.json<Record<string, string | null>>();
   for (const [k, v] of Object.entries(body)) {
-    if (![...EXPOSED_SETTINGS, 'gateway_api_key'].includes(k)) continue;
+    if (![...EXPOSED_SETTINGS, 'gateway_api_key', 'youtube_api_key'].includes(k)) continue;
     if (v === null || v === '') {
       getDb().prepare('DELETE FROM settings WHERE k = ?').run(k);
     } else {
