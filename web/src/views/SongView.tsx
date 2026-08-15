@@ -65,6 +65,13 @@ export function SongView({
   const activeLineRef = useRef<HTMLDivElement | null>(null);
   const barRef = useRef<HTMLDivElement | null>(null);
 
+  // The import message is a one-shot: it belongs to the page it opened, and
+  // should not come back when the same song is opened again later.
+  useEffect(() => {
+    if (notice) onNoticeSeen?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const { masteryOf, enrich } = useSongWords(words.data?.words);
 
   const troubleLineIds = useMemo(
@@ -336,7 +343,7 @@ export function SongView({
         {verses.map((verse) => (
           <button
             key={verse.verseIdx}
-            className={verse.verseIdx === (focusVerse ?? activeVerse) ? ' on' : ''}
+            className={verse.verseIdx === (focusVerse ?? activeVerse) ? 'on' : ''}
             onClick={() => jumpToVerse(verse.verseIdx)}
           >
             <span className={`n${verse.state === 'done' ? ' done' : ''}`}>
