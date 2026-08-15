@@ -3,8 +3,11 @@ import { api, type GradePreview } from '../lib/api';
 import { Furigana } from '../components/Furigana';
 import { RubyText } from '../components/RubyText';
 import { YouTubePlayer, type PlayerHandle } from '../components/YouTubePlayer';
-import { Ring, interval, masteryOf } from '../components/bits';
+import { Ring, masteryOf } from '../components/bits';
 import type { Card, CardKind, CardReasonKind, ClozeChoice } from '../../../shared/types';
+import { GradeButton } from './review/GradeButton';
+import { SessionComplete } from './review/SessionComplete';
+import { REASONS, sessionLabel, ordinal, kindLabel } from './review/labels';
 
 /**
  * The review runner: one card on screen, nothing else.
@@ -14,6 +17,8 @@ import type { Card, CardKind, CardReasonKind, ClozeChoice } from '../../../share
  * to the schedule, so the choice is informed. After a third miss the card stops
  * asking for an answer and asks what is going wrong instead; that answer shows
  * up on Today, next to the drill it changed.
+ *
+ * The card kinds' own rendering and the end-of-session screen live in ./review.
  */
 
 interface Session {
@@ -36,13 +41,6 @@ export interface ReviewOptions {
 
 /** Cards a session asks for when the caller has no opinion — about four minutes. */
 const DEFAULT_LIMIT = 30;
-
-const REASONS: { key: CardReasonKind; label: string }[] = [
-  { key: 'looks-like-another', label: 'Looks like another word' },
-  { key: 'cannot-hear', label: 'Can’t hear the difference' },
-  { key: 'meaning', label: 'Meaning won’t stick' },
-  { key: 'reading', label: 'Reading won’t stick' },
-];
 
 export function Review({
   options,
@@ -523,26 +521,7 @@ export function Review({
           )}
         </div>
 
-        {!revealed ? (
-          // A multiple-choice card has no reveal button: the options are how it
-          // is answered, and a peek followed by a self-awarded "Easy" is exactly
-          // the grade the options exist to replace.
-          isMultipleChoice ? (
-            <p className="muted" style={{ textAlign: 'center' }}>
-              Pick one — <span className="kbd">1</span>-<span className="kbd">4</span>.
-            </p>
-          ) : (
-            <div className="row" style={{ justifyContent: 'center' }}>
-              <button
-                className="primary"
-                style={{ minWidth: 220 }}
-                onClick={() => setRevealed(true)}
-              >
-                Show answer <span className="kbd">space</span>
-              </button>
-            </div>
-          )
-        ) : (
+        {revealed ? (
           <>
             {missed ? (
               <div className="grade-row locked">
@@ -652,153 +631,27 @@ export function Review({
               </button>
             </div>
           </>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function GradeButton({
-  tone,
-  label,
-  days,
-  n,
-  onClick,
-}: {
-  tone: 'again' | 'hard' | 'good' | 'easy';
-  label: string;
-  days: number | undefined;
-  n: number;
-  onClick: () => void;
-}) {
-  return (
-    <button className={tone} onClick={onClick}>
-      <b>{label}</b>
-      <small>{days === undefined ? '—' : interval(days)}</small>
-      <span className="n">{n}</span>
-    </button>
-  );
-}
-
-/**
- * The end of a session, and a reason to have got here.
- *
- * Stage mode unlocks for the song being studied once enough of it is known,
- * which is the point of the whole loop: the cards exist so the song becomes
- * singable.
- */
-function SessionComplete({
-  answered,
-  learned,
-  songId,
-  onAgain,
-  onDone,
-  onOpenSong,
-}: {
-  answered: { correct: number; total: number };
-  learned: number;
-  songId?: number;
-  onAgain: () => void;
-  onDone: () => void;
-  onOpenSong?: (songId: number) => void;
-}) {
-  const accuracy =
-    answered.total > 0 ? Math.round((answered.correct / answered.total) * 100) : 0;
-  // Read back after the session so the streak reflects the reviews just done.
-  const [streak, setStreak] = useState<number | null>(null);
-
-  useEffect(() => {
-    void api
-      .stats()
-      .then((s) => setStreak(s.streakDays))
-      .catch(() => setStreak(null));
-  }, []);
-
-  return (
-    <div className="done-card">
-      <div className="glow" />
-      <div className="leaf">🌿</div>
-      <h2>Set finished.</h2>
-      <p>
-        {answered.total} card{answered.total === 1 ? '' : 's'}, {accuracy}% right
-        {learned > 0 ? `, and ${learned} you had never answered before finally landed.` : '.'}
-      </p>
-
-      <div className="tiles">
-        <div>
-          <div className="value">{streak ?? '—'}</div>
-          <div className="label">DAY STREAK</div>
-        </div>
-        <div>
-          <div className="value plain">＋{learned}</div>
-          <div className="label">NEWLY MEMORISED</div>
-        </div>
-      </div>
-
-      {songId && accuracy >= 70 && (
-        <div className="unlocked">
-          <div className="cap" style={{ color: 'var(--sage-dim)' }}>
-            Unlocked
-          </div>
-          <div className="row" style={{ gap: 12 }}>
-            <span className="icon">🎤</span>
-            <div>
-              <div style={{ fontWeight: 700, color: 'var(--white)', fontSize: 15 }}>
-                Stage mode for this song
-              </div>
-              <div style={{ fontSize: 12.5, color: 'var(--sage)' }}>
-                You know enough of it to sing it now.
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      <div className="actions">
-        {songId && onOpenSong ? (
-          <button className="take" onClick={() => onOpenSong(songId)}>
-            Take the stage ▸
-          </button>
         ) : (
-          <button className="take" onClick={onAgain}>
-            Another round ▸
-          </button>
+          // A multiple-choice card has no reveal button: the options are how it
+          // is answered, and a peek followed by a self-awarded "Easy" is exactly
+          // the grade the options exist to replace.
+          isMultipleChoice ? (
+            <p className="muted" style={{ textAlign: 'center' }}>
+              Pick one — <span className="kbd">1</span>-<span className="kbd">4</span>.
+            </p>
+          ) : (
+            <div className="row" style={{ justifyContent: 'center' }}>
+              <button
+                className="primary"
+                style={{ minWidth: 220 }}
+                onClick={() => setRevealed(true)}
+              >
+                Show answer <span className="kbd">space</span>
+              </button>
+            </div>
+          )
         )}
-        <div className="row" style={{ gap: 9 }}>
-          <button className="forest" style={{ flex: 1 }} onClick={onAgain}>
-            Another round
-          </button>
-          <button className="forest quiet" style={{ flex: 1 }} onClick={onDone}>
-            That’s enough
-          </button>
-        </div>
       </div>
     </div>
   );
-}
-
-function sessionLabel(options: ReviewOptions): string {
-  if (options.leeches) return 'TROUBLE DRILL';
-  if (options.songId) return 'THIS SONG';
-  if (options.kinds?.length) return options.kinds.join(' + ').toUpperCase();
-  return 'MIXED REVIEW';
-}
-
-function ordinal(n: number): string {
-  if (n % 10 === 1 && n % 100 !== 11) return 'st';
-  if (n % 10 === 2 && n % 100 !== 12) return 'nd';
-  if (n % 10 === 3 && n % 100 !== 13) return 'rd';
-  return 'th';
-}
-
-function kindLabel(kind: CardKind): string {
-  const labels: Record<CardKind, string> = {
-    vocab: 'vocabulary',
-    grammar: 'grammar',
-    cloze: 'fill the blank',
-    listening: 'listening',
-    kana: 'katakana',
-    kanji: 'kanji',
-  };
-  return labels[kind] ?? kind;
 }
