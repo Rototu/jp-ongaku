@@ -48,7 +48,7 @@ export function TypedAnswer({
       <div className="typed-preview mono">
         {typedToKana(value) || <span className="faint">your answer in kana</span>}
       </div>
-      <button className="primary small" disabled={!value.trim() || disabled} onClick={submit}>
+      <button className="primary small" disabled={!value.trim() || disabled}>
         Check <span className="kbd">⏎</span>
       </button>
     </form>
