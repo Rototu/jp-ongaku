@@ -1,5 +1,5 @@
-import { Database } from 'bun:sqlite';
-import { USER_DB, ensureDirs } from './paths';
+import { Database } from "bun:sqlite";
+import { USER_DB, ensureDirs } from "./paths";
 
 /**
  * The user's own database: songs, lessons, cards, review history, progress.
@@ -17,8 +17,8 @@ export function getDb(): Database {
   if (db) return db;
   ensureDirs();
   db = new Database(USER_DB, { create: true });
-  db.exec('PRAGMA journal_mode = WAL');
-  db.exec('PRAGMA foreign_keys = ON');
+  db.exec("PRAGMA journal_mode = WAL");
+  db.exec("PRAGMA foreign_keys = ON");
   migrate(db);
   return db;
 }
@@ -31,7 +31,7 @@ export function getDb(): Database {
 export function closeDb(): void {
   if (!db) return;
   try {
-    db.exec('PRAGMA wal_checkpoint(TRUNCATE)');
+    db.exec("PRAGMA wal_checkpoint(TRUNCATE)");
     db.close();
   } catch {
     /* closing a handle that is somehow already gone is fine */
@@ -51,7 +51,9 @@ export function closeDb(): void {
  * genuinely destructive steps should ever be gated on it.
  */
 function migrate(d: Database) {
-  d.exec(`CREATE TABLE IF NOT EXISTS schema_meta (k TEXT PRIMARY KEY, v TEXT NOT NULL)`);
+  d.exec(
+    `CREATE TABLE IF NOT EXISTS schema_meta (k TEXT PRIMARY KEY, v TEXT NOT NULL)`,
+  );
 
   createBaseSchema(d);
   addTitleAnnotationColumns(d); // v2
@@ -62,8 +64,8 @@ function migrate(d: Database) {
   // covers — a new table needs no step of its own.
   addSeenAsColumn(d); // v7
 
-  d.prepare('INSERT OR REPLACE INTO schema_meta (k, v) VALUES (?, ?)').run(
-    'version',
+  d.prepare("INSERT OR REPLACE INTO schema_meta (k, v) VALUES (?, ?)").run(
+    "version",
     String(SCHEMA_VERSION),
   );
 }
@@ -78,18 +80,20 @@ function migrate(d: Database) {
  */
 const MIGRATION_COLUMNS: Record<string, Record<string, string>> = {
   songs: {
-    title_furigana: 'ALTER TABLE songs ADD COLUMN title_furigana TEXT',
-    title_romaji: 'ALTER TABLE songs ADD COLUMN title_romaji TEXT',
-    artist_furigana: 'ALTER TABLE songs ADD COLUMN artist_furigana TEXT',
-    artist_romaji: 'ALTER TABLE songs ADD COLUMN artist_romaji TEXT',
-    context: 'ALTER TABLE songs ADD COLUMN context TEXT',
-    favourite: 'ALTER TABLE songs ADD COLUMN favourite INTEGER NOT NULL DEFAULT 0',
+    title_furigana: "ALTER TABLE songs ADD COLUMN title_furigana TEXT",
+    title_romaji: "ALTER TABLE songs ADD COLUMN title_romaji TEXT",
+    artist_furigana: "ALTER TABLE songs ADD COLUMN artist_furigana TEXT",
+    artist_romaji: "ALTER TABLE songs ADD COLUMN artist_romaji TEXT",
+    context: "ALTER TABLE songs ADD COLUMN context TEXT",
+    favourite:
+      "ALTER TABLE songs ADD COLUMN favourite INTEGER NOT NULL DEFAULT 0",
   },
   line_analysis: {
-    chunks: "ALTER TABLE line_analysis ADD COLUMN chunks TEXT NOT NULL DEFAULT '[]'",
+    chunks:
+      "ALTER TABLE line_analysis ADD COLUMN chunks TEXT NOT NULL DEFAULT '[]'",
   },
   word_songs: {
-    seen_as: 'ALTER TABLE word_songs ADD COLUMN seen_as TEXT',
+    seen_as: "ALTER TABLE word_songs ADD COLUMN seen_as TEXT",
   },
 };
 
@@ -98,7 +102,7 @@ function addColumn(d: Database, table: string, column: string) {
   const alter = MIGRATION_COLUMNS[table]?.[column];
   if (!alter) throw new Error(`unknown migration column: ${table}.${column}`);
   const cols = d
-    .query<{ name: string }, [string]>('SELECT name FROM pragma_table_info(?)')
+    .query<{ name: string }, [string]>("SELECT name FROM pragma_table_info(?)")
     .all(table);
   if (cols.some((c) => c.name === column)) return;
   d.exec(alter);
@@ -109,10 +113,10 @@ function addColumn(d: Database, table: string, column: string) {
  * like a song name is readable in the library without opening it.
  */
 function addTitleAnnotationColumns(d: Database) {
-  addColumn(d, 'songs', 'title_furigana');
-  addColumn(d, 'songs', 'title_romaji');
-  addColumn(d, 'songs', 'artist_furigana');
-  addColumn(d, 'songs', 'artist_romaji');
+  addColumn(d, "songs", "title_furigana");
+  addColumn(d, "songs", "title_romaji");
+  addColumn(d, "songs", "artist_furigana");
+  addColumn(d, "songs", "artist_romaji");
 }
 
 /**
@@ -120,7 +124,7 @@ function addTitleAnnotationColumns(d: Database) {
  * meaning and explanation — cached alongside the line's translation.
  */
 function addChunkColumn(d: Database) {
-  addColumn(d, 'line_analysis', 'chunks');
+  addColumn(d, "line_analysis", "chunks");
 }
 
 /**
@@ -130,7 +134,7 @@ function addChunkColumn(d: Database) {
  * the same version but live in createBaseSchema, since they are whole tables.
  */
 function addSongContextColumn(d: Database) {
-  addColumn(d, 'songs', 'context');
+  addColumn(d, "songs", "context");
 }
 
 /**
@@ -139,7 +143,7 @@ function addSongContextColumn(d: Database) {
  * createBaseSchema, since it is a whole table.
  */
 function addFavouriteColumn(d: Database) {
-  addColumn(d, 'songs', 'favourite');
+  addColumn(d, "songs", "favourite");
 }
 
 /**
@@ -151,7 +155,7 @@ function addFavouriteColumn(d: Database) {
  * could never find its own SRS state. Recording the surface closes the gap.
  */
 function addSeenAsColumn(d: Database) {
-  addColumn(d, 'word_songs', 'seen_as');
+  addColumn(d, "word_songs", "seen_as");
 }
 
 function createBaseSchema(d: Database) {
@@ -356,20 +360,22 @@ export function nowIso(): string {
 
 export function getSetting(key: string): string | null {
   const row = getDb()
-    .query<{ v: string }, [string]>('SELECT v FROM settings WHERE k = ?')
+    .query<{ v: string }, [string]>("SELECT v FROM settings WHERE k = ?")
     .get(key);
   return row?.v ?? null;
 }
 
 export function setSetting(key: string, value: string): void {
-  getDb().prepare('INSERT OR REPLACE INTO settings (k, v) VALUES (?, ?)').run(key, value);
+  getDb()
+    .prepare("INSERT OR REPLACE INTO settings (k, v) VALUES (?, ?)")
+    .run(key, value);
 }
 
 /** Test hook: point the module at a scratch database. */
 export function _setDbForTests(instance: Database | null) {
   db = instance;
   if (instance) {
-    instance.exec('PRAGMA foreign_keys = ON');
+    instance.exec("PRAGMA foreign_keys = ON");
     migrate(instance);
   }
 }

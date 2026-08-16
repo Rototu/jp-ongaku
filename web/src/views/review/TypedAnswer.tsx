@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { typedToKana, type ReadingCheck } from '../../../../shared/kana';
+import { useState } from "react";
+import { typedToKana, type ReadingCheck } from "../../../../shared/kana";
 
 /**
  * The typed-reading answer: an input that turns romaji into kana live, and —
@@ -19,7 +19,7 @@ export function TypedAnswer({
   disabled: boolean;
   onSubmit: (raw: string) => void;
 }) {
-  const [value, setValue] = useState('');
+  const [value, setValue] = useState("");
 
   const submit = () => {
     if (!value.trim() || disabled) return;
@@ -46,7 +46,9 @@ export function TypedAnswer({
         disabled={disabled}
       />
       <div className="typed-preview mono">
-        {typedToKana(value) || <span className="faint">your answer in kana</span>}
+        {typedToKana(value) || (
+          <span className="faint">your answer in kana</span>
+        )}
       </div>
       <button className="primary small" disabled={!value.trim() || disabled}>
         Check <span className="kbd">⏎</span>
@@ -63,9 +65,9 @@ export function ReadingDiff({
   check: ReadingCheck;
   expectedReading: string;
 }) {
-  const parts = (check: ReadingCheck, which: 'typed' | 'expected') =>
+  const parts = (check: ReadingCheck, which: "typed" | "expected") =>
     check[which].map((p, i) => (
-      <span key={i} className={p.wrong ? 'wrong' : ''}>
+      <span key={i} className={p.wrong ? "wrong" : ""}>
         {p.text}
       </span>
     ));
@@ -83,11 +85,11 @@ export function ReadingDiff({
         <>
           <div className="diff">
             <span className="cap">you typed</span>
-            <span className="jp-line">{parts(check, 'typed')}</span>
+            <span className="jp-line">{parts(check, "typed")}</span>
           </div>
           <div className="diff">
             <span className="cap">reading</span>
-            <span className="jp-line">{parts(check, 'expected')}</span>
+            <span className="jp-line">{parts(check, "expected")}</span>
           </div>
         </>
       )}

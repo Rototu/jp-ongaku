@@ -1,16 +1,23 @@
-import { Hono } from 'hono';
-import { readFileSync, unlinkSync, writeFileSync } from 'node:fs';
-import { getDb, getSetting, nowIso, setSetting, closeDb, SCHEMA_VERSION } from '../db';
-import { snapshotDatabase, swapDatabase, validateDatabase } from '../backup';
-import { DATA_DIR, USER_DB } from '../paths';
-import { dict } from '../dict';
-import * as lrclib from '../lyrics/lrclib';
-import * as youtube from '../lyrics/youtube';
-import { parseLrc, parsePlain } from '../lyrics/lrc';
-import { buildLesson } from '../lesson/build';
-import { seedKatakanaDeck, katakanaDeckSize } from '../lesson/kana-deck';
-import { annotate, annotateWithReading } from '../lesson/titles';
-import * as srs from '../srs/store';
+import { Hono } from "hono";
+import { readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import {
+  getDb,
+  getSetting,
+  nowIso,
+  setSetting,
+  closeDb,
+  SCHEMA_VERSION,
+} from "../db";
+import { snapshotDatabase, swapDatabase, validateDatabase } from "../backup";
+import { DATA_DIR, USER_DB } from "../paths";
+import { dict } from "../dict";
+import * as lrclib from "../lyrics/lrclib";
+import * as youtube from "../lyrics/youtube";
+import { parseLrc, parsePlain } from "../lyrics/lrc";
+import { buildLesson } from "../lesson/build";
+import { seedKatakanaDeck, katakanaDeckSize } from "../lesson/kana-deck";
+import { annotate, annotateWithReading } from "../lesson/titles";
+import * as srs from "../srs/store";
 import {
   askAboutWord,
   cachedExamples,
@@ -22,13 +29,13 @@ import {
   songReadings,
   type KanjiFacts,
   type WordRef,
-} from '../llm/analyze';
-import * as jobs from '../llm/jobs';
-import { LlmUnavailable, status as llmStatus } from '../llm/provider';
-import { annotateText, KNOWN_SCOPE } from '../nlp/annotate';
-import { tokenizeLine } from '../nlp/tokenize';
-import { ENROLL_THRESHOLD } from '../nlp/priority';
-import type { AnalyzedToken } from '../nlp/tokenize';
+} from "../llm/analyze";
+import * as jobs from "../llm/jobs";
+import { LlmUnavailable, status as llmStatus } from "../llm/provider";
+import { annotateText, KNOWN_SCOPE } from "../nlp/annotate";
+import { tokenizeLine } from "../nlp/tokenize";
+import { ENROLL_THRESHOLD } from "../nlp/priority";
+import type { AnalyzedToken } from "../nlp/tokenize";
 import type {
   AiChunk,
   CardKind,
@@ -40,7 +47,7 @@ import type {
   SongDetail,
   SongLine,
   VerseProgress,
-} from '../../shared/types';
+} from "../../shared/types";
 
 export const api = new Hono();
 
@@ -55,10 +62,10 @@ export const parseYoutubeId = youtube.videoIdFrom;
 /** m:ss for a millisecond length, for notices about a song's runtime. */
 function clockSec(ms: number): string {
   const total = Math.round(ms / 1000);
-  return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')}`;
+  return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, "0")}`;
 }
 
-api.get('/health', (c) => {
+api.get("/health", (c) => {
   const d = dict().stats();
   return c.json({
     ok: true,
@@ -95,11 +102,11 @@ async function annotateHits(hits: lrclib.LrclibHit[]) {
   );
 }
 
-api.get('/search', async (c) => {
-  const q = c.req.query('q')?.trim();
-  const artist = c.req.query('artist')?.trim();
-  const duration = Number(c.req.query('duration'));
-  if (!q) return c.json({ error: 'q is required' }, 400);
+api.get("/search", async (c) => {
+  const q = c.req.query("q")?.trim();
+  const artist = c.req.query("artist")?.trim();
+  const duration = Number(c.req.query("duration"));
+  if (!q) return c.json({ error: "q is required" }, 400);
   try {
     const hits = await lrclib.search(
       q,
@@ -111,7 +118,7 @@ api.get('/search', async (c) => {
     return c.json(
       {
         hits: [],
-        error: `Lyrics search unavailable: ${err instanceof Error ? err.message : 'unknown error'}`,
+        error: `Lyrics search unavailable: ${err instanceof Error ? err.message : "unknown error"}`,
       },
       502,
     );
@@ -127,9 +134,9 @@ api.get('/search', async (c) => {
  * lyric candidates come back ranked against that length — so the full song sorts
  * above the TV-size edit without the user having to know which is which.
  */
-api.get('/youtube/resolve', async (c) => {
-  const url = c.req.query('url')?.trim();
-  if (!url) return c.json({ error: 'url is required' }, 400);
+api.get("/youtube/resolve", async (c) => {
+  const url = c.req.query("url")?.trim();
+  if (!url) return c.json({ error: "url is required" }, 400);
 
   let video: youtube.YoutubeMeta;
   try {
@@ -137,7 +144,9 @@ api.get('/youtube/resolve', async (c) => {
   } catch (err) {
     const status = err instanceof youtube.NotAVideo ? 400 : 502;
     return c.json(
-      { error: err instanceof Error ? err.message : 'Could not read that video' },
+      {
+        error: err instanceof Error ? err.message : "Could not read that video",
+      },
       status,
     );
   }
@@ -147,7 +156,11 @@ api.get('/youtube/resolve', async (c) => {
     // returns Japanese lyrics, since anything else is unusable for studying.
     let hits: lrclib.LrclibHit[] = [];
     for (const candidate of youtube.searchCandidates(video)) {
-      const found = await lrclib.search(candidate.q, candidate.artist, video.durationSec);
+      const found = await lrclib.search(
+        candidate.q,
+        candidate.artist,
+        video.durationSec,
+      );
       if (found.some((h) => h.japanese)) {
         hits = found;
         break;
@@ -161,12 +174,12 @@ api.get('/youtube/resolve', async (c) => {
     return c.json({
       video,
       hits: [],
-      error: `Lyrics search unavailable: ${err instanceof Error ? err.message : 'unknown error'}`,
+      error: `Lyrics search unavailable: ${err instanceof Error ? err.message : "unknown error"}`,
     });
   }
 });
 
-api.post('/songs/import', async (c) => {
+api.post("/songs/import", async (c) => {
   const body = await c.req.json<{
     lrclibId?: number;
     title?: string;
@@ -185,14 +198,15 @@ api.post('/songs/import', async (c) => {
     try {
       fetched = await lrclib.fetchById(body.lrclibId);
     } catch (err) {
-      const msg = err instanceof lrclib.NotFound ? 'not found on LRCLIB' : String(err);
+      const msg =
+        err instanceof lrclib.NotFound ? "not found on LRCLIB" : String(err);
       return c.json({ error: `Could not fetch lyrics: ${msg}` }, 502);
     }
     if (!lrclib.hasJapanese(fetched.raw)) {
       return c.json(
         {
           error:
-            'Those lyrics contain no Japanese script — probably a romaji or translated transcription. Pick another result or paste the Japanese lyrics.',
+            "Those lyrics contain no Japanese script — probably a romaji or translated transcription. Pick another result or paste the Japanese lyrics.",
         },
         422,
       );
@@ -201,7 +215,7 @@ api.post('/songs/import', async (c) => {
       title: fetched.title,
       artist: fetched.artist,
       album: fetched.album,
-      source: 'lrclib',
+      source: "lrclib",
       lrclibId: fetched.lrclibId,
       durationMs: fetched.durationMs,
       youtubeId,
@@ -222,22 +236,25 @@ api.post('/songs/import', async (c) => {
 
   const { title, artist, lyrics } = body;
   if (!title?.trim() || !artist?.trim() || !lyrics?.trim()) {
-    return c.json({ error: 'title, artist and lyrics are all required when pasting' }, 400);
+    return c.json(
+      { error: "title, artist and lyrics are all required when pasting" },
+      400,
+    );
   }
   if (!lrclib.hasJapanese(lyrics)) {
-    return c.json({ error: 'Those lyrics contain no Japanese script.' }, 422);
+    return c.json({ error: "Those lyrics contain no Japanese script." }, 422);
   }
 
   // Pasted text may itself be an LRC file with timestamps.
   const looksLrc = /\[\d{1,3}:\d{1,2}/.test(lyrics);
   const lines = looksLrc ? parseLrc(lyrics).lines : parsePlain(lyrics);
-  if (lines.length === 0) return c.json({ error: 'No lyric lines found' }, 400);
+  if (lines.length === 0) return c.json({ error: "No lyric lines found" }, 400);
 
   const result = await buildLesson({
     title: title.trim(),
     artist: artist.trim(),
     album: body.album?.trim() || null,
-    source: 'paste',
+    source: "paste",
     youtubeId,
     context,
     lines,
@@ -289,7 +306,7 @@ function toSong(row: SongRow, lineCount: number, verseCount: number): Song {
     artistFurigana: parseSegments(row.artist_furigana),
     artistRomaji: row.artist_romaji || null,
     album: row.album,
-    source: row.source as 'lrclib' | 'paste',
+    source: row.source as "lrclib" | "paste",
     context: row.context,
     youtubeId: row.youtube_id,
     durationMs: row.duration_ms,
@@ -302,10 +319,18 @@ function toSong(row: SongRow, lineCount: number, verseCount: number): Song {
   };
 }
 
-api.get('/songs', (c) => {
+api.get("/songs", (c) => {
   const db = getDb();
   const rows = db
-    .query<SongRow & { line_count: number; verse_count: number; due: number; cards: number }, []>(
+    .query<
+      SongRow & {
+        line_count: number;
+        verse_count: number;
+        due: number;
+        cards: number;
+      },
+      []
+    >(
       `SELECT s.*,
               (SELECT COUNT(*) FROM lines l WHERE l.song_id = s.id) AS line_count,
               (SELECT COUNT(DISTINCT l.verse_idx) FROM lines l WHERE l.song_id = s.id) AS verse_count,
@@ -325,11 +350,13 @@ api.get('/songs', (c) => {
   });
 });
 
-api.get('/songs/:id', (c) => {
-  const id = Number(c.req.param('id'));
+api.get("/songs/:id", (c) => {
+  const id = Number(c.req.param("id"));
   const db = getDb();
-  const song = db.query<SongRow, [number]>('SELECT * FROM songs WHERE id = ?').get(id);
-  if (!song) return c.json({ error: 'song not found' }, 404);
+  const song = db
+    .query<SongRow, [number]>("SELECT * FROM songs WHERE id = ?")
+    .get(id);
+  if (!song) return c.json({ error: "song not found" }, 404);
 
   const lineRows = db
     .query<
@@ -379,22 +406,25 @@ api.get('/songs/:id', (c) => {
 
   const progressRows = db
     .query<{ verse_idx: number; state: string; lines_done: number }, [number]>(
-      'SELECT verse_idx, state, lines_done FROM verse_progress WHERE song_id = ? ORDER BY verse_idx',
+      "SELECT verse_idx, state, lines_done FROM verse_progress WHERE song_id = ? ORDER BY verse_idx",
     )
     .all(id);
 
   const counts = new Map<number, number>();
-  for (const l of lines) counts.set(l.verseIdx, (counts.get(l.verseIdx) ?? 0) + 1);
+  for (const l of lines)
+    counts.set(l.verseIdx, (counts.get(l.verseIdx) ?? 0) + 1);
 
-  const progress: VerseProgress[] = [...counts.keys()].sort((a, b) => a - b).map((verseIdx) => {
-    const row = progressRows.find((p) => p.verse_idx === verseIdx);
-    return {
-      verseIdx,
-      state: (row?.state ?? 'new') as VerseProgress['state'],
-      linesDone: row?.lines_done ?? 0,
-      lineCount: counts.get(verseIdx) ?? 0,
-    };
-  });
+  const progress: VerseProgress[] = [...counts.keys()]
+    .sort((a, b) => a - b)
+    .map((verseIdx) => {
+      const row = progressRows.find((p) => p.verse_idx === verseIdx);
+      return {
+        verseIdx,
+        state: (row?.state ?? "new") as VerseProgress["state"],
+        linesDone: row?.lines_done ?? 0,
+        lineCount: counts.get(verseIdx) ?? 0,
+      };
+    });
 
   const detail: SongDetail = {
     ...toSong(song, lines.length, counts.size),
@@ -404,9 +434,9 @@ api.get('/songs/:id', (c) => {
   return c.json(detail);
 });
 
-api.delete('/songs/:id', (c) => {
-  const id = Number(c.req.param('id'));
-  const res = getDb().prepare('DELETE FROM songs WHERE id = ?').run(id);
+api.delete("/songs/:id", (c) => {
+  const id = Number(c.req.param("id"));
+  const res = getDb().prepare("DELETE FROM songs WHERE id = ?").run(id);
   return c.json({ deleted: res.changes > 0 });
 });
 
@@ -415,17 +445,18 @@ api.delete('/songs/:id', (c) => {
  * `field` comes from the `as const` tuple below, so these are the only two.
  */
 const READING_SELECT = {
-  title: 'SELECT title AS text FROM songs WHERE id = ?',
-  artist: 'SELECT artist AS text FROM songs WHERE id = ?',
+  title: "SELECT title AS text FROM songs WHERE id = ?",
+  artist: "SELECT artist AS text FROM songs WHERE id = ?",
 } as const;
 
 const READING_UPDATE = {
-  title: 'UPDATE songs SET title_furigana = ?, title_romaji = ? WHERE id = ?',
-  artist: 'UPDATE songs SET artist_furigana = ?, artist_romaji = ? WHERE id = ?',
+  title: "UPDATE songs SET title_furigana = ?, title_romaji = ? WHERE id = ?",
+  artist:
+    "UPDATE songs SET artist_furigana = ?, artist_romaji = ? WHERE id = ?",
 } as const;
 
-api.patch('/songs/:id', async (c) => {
-  const id = Number(c.req.param('id'));
+api.patch("/songs/:id", async (c) => {
+  const id = Number(c.req.param("id"));
   const body = await c.req.json<{
     youtubeId?: string | null;
     timings?: { idx: number; timeMs: number }[];
@@ -438,14 +469,17 @@ api.patch('/songs/:id', async (c) => {
   const db = getDb();
 
   if (body.favourite !== undefined) {
-    db.prepare('UPDATE songs SET favourite = ? WHERE id = ?').run(body.favourite ? 1 : 0, id);
+    db.prepare("UPDATE songs SET favourite = ? WHERE id = ?").run(
+      body.favourite ? 1 : 0,
+      id,
+    );
   }
 
   // Context can be edited after import: the user often finds the interview or
   // the plot summary after the lesson already exists, and re-explaining the
   // song then picks it up.
   if (body.context !== undefined) {
-    db.prepare('UPDATE songs SET context = ? WHERE id = ?').run(
+    db.prepare("UPDATE songs SET context = ? WHERE id = ?").run(
       body.context?.trim() || null,
       id,
     );
@@ -454,28 +488,29 @@ api.patch('/songs/:id', async (c) => {
   // Reading overrides: the automatic guess is wrong for most coined titles.
   // Identifiers are never interpolated: each field has its own literal SQL.
   for (const [field, value] of [
-    ['title', body.titleReading],
-    ['artist', body.artistReading],
+    ["title", body.titleReading],
+    ["artist", body.artistReading],
   ] as const) {
     if (value === undefined) continue;
     const row = db
       .query<{ text: string }, [number]>(READING_SELECT[field])
       .get(id);
-    if (!row) return c.json({ error: 'song not found' }, 404);
+    if (!row) return c.json({ error: "song not found" }, 404);
 
     if (!value.trim()) {
       // Cleared: fall back to the automatic annotation.
       const auto = await annotate(row.text);
       db.prepare(READING_UPDATE[field]).run(
         auto ? JSON.stringify(auto.furigana) : null,
-        auto ? auto.romaji : '',
+        auto ? auto.romaji : "",
         id,
       );
       continue;
     }
 
     const applied = annotateWithReading(row.text, value);
-    if (!applied) return c.json({ error: `Could not read "${value}" as a reading` }, 400);
+    if (!applied)
+      return c.json({ error: `Could not read "${value}" as a reading` }, 400);
     db.prepare(READING_UPDATE[field]).run(
       JSON.stringify(applied.furigana),
       applied.romaji,
@@ -486,9 +521,12 @@ api.patch('/songs/:id', async (c) => {
   if (body.youtubeId !== undefined) {
     const parsed = parseYoutubeId(body.youtubeId);
     if (body.youtubeId && !parsed) {
-      return c.json({ error: 'Could not read a YouTube video id from that' }, 400);
+      return c.json(
+        { error: "Could not read a YouTube video id from that" },
+        400,
+      );
     }
-    db.prepare('UPDATE songs SET youtube_id = ? WHERE id = ?').run(parsed, id);
+    db.prepare("UPDATE songs SET youtube_id = ? WHERE id = ?").run(parsed, id);
     // Listening cards carry the video id inside their audio clip, so a changed
     // video has to repoint them — otherwise every clip keeps playing the old
     // upload. The upsert keeps card ids, and with them the review history. A
@@ -498,10 +536,12 @@ api.patch('/songs/:id', async (c) => {
   }
 
   if (body.timings?.length) {
-    const upd = db.prepare('UPDATE lines SET time_ms = ? WHERE song_id = ? AND idx = ?');
+    const upd = db.prepare(
+      "UPDATE lines SET time_ms = ? WHERE song_id = ? AND idx = ?",
+    );
     db.transaction(() => {
       for (const t of body.timings!) upd.run(Math.round(t.timeMs), id, t.idx);
-      db.prepare('UPDATE songs SET synced = 1 WHERE id = ?').run(id);
+      db.prepare("UPDATE songs SET synced = 1 WHERE id = ?").run(id);
     })();
     // Timings unlock listening cards, which need a video to play.
     rebuildListeningCards(id);
@@ -520,12 +560,12 @@ api.patch('/songs/:id', async (c) => {
     // crop the scrub bar; the video is the authority on how long the track is.
     const last = db
       .query<{ t: number | null }, [number]>(
-        'SELECT MAX(time_ms) AS t FROM lines WHERE song_id = ?',
+        "SELECT MAX(time_ms) AS t FROM lines WHERE song_id = ?",
       )
       .get(id);
     if (last?.t != null) {
       db.prepare(
-        'UPDATE songs SET duration_ms = MAX(COALESCE(duration_ms, 0), ?) WHERE id = ?',
+        "UPDATE songs SET duration_ms = MAX(COALESCE(duration_ms, 0), ?) WHERE id = ?",
       ).run(last.t + 8000, id);
     }
     // Every clip's start and end moved with the lines.
@@ -544,14 +584,17 @@ api.patch('/songs/:id', async (c) => {
 export function rebuildListeningCards(songId: number) {
   const db = getDb();
   const song = db
-    .query<{ youtube_id: string | null }, [number]>('SELECT youtube_id FROM songs WHERE id = ?')
+    .query<{ youtube_id: string | null }, [number]>(
+      "SELECT youtube_id FROM songs WHERE id = ?",
+    )
     .get(songId);
   if (!song?.youtube_id) return;
 
   const lines = db
-    .query<{ id: number; idx: number; text: string; time_ms: number | null }, [number]>(
-      'SELECT id, idx, text, time_ms FROM lines WHERE song_id = ? ORDER BY idx',
-    )
+    .query<
+      { id: number; idx: number; text: string; time_ms: number | null },
+      [number]
+    >("SELECT id, idx, text, time_ms FROM lines WHERE song_id = ? ORDER BY idx")
     .all(songId);
 
   const insCard = db.prepare(
@@ -573,7 +616,7 @@ export function rebuildListeningCards(songId: number) {
         line.id,
         `listening:${line.id}`,
         JSON.stringify({
-          prompt: 'Listen, then read the line',
+          prompt: "Listen, then read the line",
           audio: { youtubeId: song.youtube_id, startMs: line.time_ms, endMs },
         }),
         JSON.stringify({ answer: line.text }),
@@ -599,12 +642,14 @@ export function removeListeningCards(songId: number): number {
         "SELECT COUNT(*) AS n FROM cards WHERE song_id = ? AND kind = 'listening'",
       )
       .get(songId)?.n ?? 0;
-  db.prepare("DELETE FROM cards WHERE song_id = ? AND kind = 'listening'").run(songId);
+  db.prepare("DELETE FROM cards WHERE song_id = ? AND kind = 'listening'").run(
+    songId,
+  );
   return doomed;
 }
 
-api.get('/songs/:id/words', (c) => {
-  const id = Number(c.req.param('id'));
+api.get("/songs/:id/words", (c) => {
+  const id = Number(c.req.param("id"));
   const rows = getDb()
     .query<
       {
@@ -665,7 +710,7 @@ api.get('/songs/:id/words', (c) => {
       enrolled: r.enrolled > 0,
       lapses: r.lapses ?? 0,
       retired: r.retired === 1,
-      seenAs: r.seen_as ? r.seen_as.split(',').filter(Boolean) : [],
+      seenAs: r.seen_as ? r.seen_as.split(",").filter(Boolean) : [],
       // The word garden shows a mastery ring rather than a table column, so the
       // word list carries the same SRS numbers a card does.
       mastery: srs.mastery({
@@ -685,19 +730,22 @@ api.get('/songs/:id/words', (c) => {
  * Careful analysis takes minutes on a full song, so the client polls
  * GET /songs/:id/analysis rather than holding a request open.
  */
-api.post('/songs/:id/analyze', (c) => {
-  const id = Number(c.req.param('id'));
-  const force = c.req.query('force') === '1';
+api.post("/songs/:id/analyze", (c) => {
+  const id = Number(c.req.param("id"));
+  const force = c.req.query("force") === "1";
 
   if (jobs.isRunning(id)) return c.json(jobs.status(id));
-  if (llmStatus().provider === 'none') {
-    return c.json({ error: 'No AI provider configured', llm: llmStatus() }, 409);
+  if (llmStatus().provider === "none") {
+    return c.json(
+      { error: "No AI provider configured", llm: llmStatus() },
+      409,
+    );
   }
   return c.json(jobs.start(id, { force }));
 });
 
-api.get('/songs/:id/analysis', (c) => {
-  const id = Number(c.req.param('id'));
+api.get("/songs/:id/analysis", (c) => {
+  const id = Number(c.req.param("id"));
   const db = getDb();
   const counts = db
     .query<{ total: number; analyzed: number; segmented: number }, [number]>(
@@ -719,10 +767,15 @@ api.get('/songs/:id/analysis', (c) => {
   });
 });
 
-api.post('/songs/:id/progress', async (c) => {
-  const id = Number(c.req.param('id'));
-  const body = await c.req.json<{ verseIdx: number; linesDone?: number; state?: string }>();
-  if (typeof body.verseIdx !== 'number') return c.json({ error: 'verseIdx required' }, 400);
+api.post("/songs/:id/progress", async (c) => {
+  const id = Number(c.req.param("id"));
+  const body = await c.req.json<{
+    verseIdx: number;
+    linesDone?: number;
+    state?: string;
+  }>();
+  if (typeof body.verseIdx !== "number")
+    return c.json({ error: "verseIdx required" }, 400);
 
   getDb()
     .prepare(
@@ -733,23 +786,33 @@ api.post('/songs/:id/progress', async (c) => {
          lines_done = MAX(lines_done, excluded.lines_done),
          updated_at = excluded.updated_at`,
     )
-    .run(id, body.verseIdx, body.state ?? 'in_progress', body.linesDone ?? 0, nowIso());
+    .run(
+      id,
+      body.verseIdx,
+      body.state ?? "in_progress",
+      body.linesDone ?? 0,
+      nowIso(),
+    );
 
   return c.json({ ok: true });
 });
 
 // --- review -----------------------------------------------------------------
 
-api.get('/review/queue', (c) => {
-  const limit = Number(c.req.query('limit') ?? 20);
-  const songId = c.req.query('songId') ? Number(c.req.query('songId')) : undefined;
-  const kinds = c.req.query('kinds')?.split(',').filter(Boolean) as CardKind[] | undefined;
+api.get("/review/queue", (c) => {
+  const limit = Number(c.req.query("limit") ?? 20);
+  const songId = c.req.query("songId")
+    ? Number(c.req.query("songId"))
+    : undefined;
+  const kinds = c.req.query("kinds")?.split(",").filter(Boolean) as
+    | CardKind[]
+    | undefined;
   const cards = srs.queue({
     limit,
     songId,
     kinds,
-    leechesOnly: c.req.query('leeches') === '1',
-    includeAhead: c.req.query('ahead') === '1',
+    leechesOnly: c.req.query("leeches") === "1",
+    includeAhead: c.req.query("ahead") === "1",
   });
   // Each grade button says what it will do ("6 days"), so the schedule is
   // visible before the user commits to an answer rather than after.
@@ -777,14 +840,19 @@ function buildClozeChoices(
   cards: {
     id: number;
     kind: string;
-    back: { answer: string; furigana?: FuriganaSegment[]; romaji?: string; reading?: string };
+    back: {
+      answer: string;
+      furigana?: FuriganaSegment[];
+      romaji?: string;
+      reading?: string;
+    };
   }[],
 ): Record<number, ClozeChoice[]> {
   const db = getDb();
   const out: Record<number, ClozeChoice[]> = {};
 
   for (const card of cards) {
-    if (card.kind !== 'cloze') continue;
+    if (card.kind !== "cloze") continue;
     const answer = card.back.answer;
 
     const rows = db
@@ -805,13 +873,13 @@ function buildClozeChoices(
         // unannotated segment so a choice is never rendered without something.
         furigana: card.back.furigana?.length
           ? card.back.furigana
-          : [{ text: answer, ruby: '' }],
-        romaji: card.back.romaji ?? '',
+          : [{ text: answer, ruby: "" }],
+        romaji: card.back.romaji ?? "",
       },
       ...rows.map((r) => ({
         text: r.lemma,
-        furigana: parseSegments(r.furigana) ?? [{ text: r.lemma, ruby: '' }],
-        romaji: r.romaji ?? '',
+        furigana: parseSegments(r.furigana) ?? [{ text: r.lemma, ruby: "" }],
+        romaji: r.romaji ?? "",
       })),
     ];
 
@@ -849,7 +917,10 @@ function buildListeningChoices(
   const db = getDb();
   const out: Record<number, string[]> = {};
 
-  const own = db.query<{ line_id: number; song_id: number | null; translation: string | null }, [number]>(
+  const own = db.query<
+    { line_id: number; song_id: number | null; translation: string | null },
+    [number]
+  >(
     `SELECT c.line_id, c.song_id, a.translation
        FROM cards c LEFT JOIN line_analysis a ON a.line_id = c.line_id
       WHERE c.id = ?`,
@@ -863,7 +934,7 @@ function buildListeningChoices(
   );
 
   for (const card of cards) {
-    if (card.kind !== 'listening') continue;
+    if (card.kind !== "listening") continue;
     const row = own.get(card.id);
     const answer = row?.translation?.trim();
     // No translation yet means no question worth asking. The card falls back to
@@ -874,7 +945,8 @@ function buildListeningChoices(
     for (const candidate of others.all(row.line_id, row.song_id ?? -1)) {
       const text = candidate.translation.trim();
       if (!text) continue;
-      if (tooAlike(text, answer) || picked.some((p) => tooAlike(text, p))) continue;
+      if (tooAlike(text, answer) || picked.some((p) => tooAlike(text, p)))
+        continue;
       picked.push(text);
       if (picked.length === 3) break;
     }
@@ -905,7 +977,7 @@ function tooAlike(a: string, b: string): boolean {
     new Set(
       s
         .toLowerCase()
-        .replace(/[^\p{L}\p{N}\s]/gu, ' ')
+        .replace(/[^\p{L}\p{N}\s]/gu, " ")
         .split(/\s+/)
         .filter(Boolean),
     );
@@ -917,23 +989,38 @@ function tooAlike(a: string, b: string): boolean {
   return shared / Math.min(x.size, y.size) > 0.6;
 }
 
-api.post('/review/grade', async (c) => {
-  const body = await c.req.json<{ cardId: number; quality: number; ms?: number; given?: string }>();
-  if (typeof body.cardId !== 'number' || typeof body.quality !== 'number') {
-    return c.json({ error: 'cardId and quality are required' }, 400);
+api.post("/review/grade", async (c) => {
+  const body = await c.req.json<{
+    cardId: number;
+    quality: number;
+    ms?: number;
+    given?: string;
+  }>();
+  if (typeof body.cardId !== "number" || typeof body.quality !== "number") {
+    return c.json({ error: "cardId and quality are required" }, 400);
   }
   try {
-    const result = srs.grade(body.cardId, body.quality, body.ms ?? 0, body.given);
+    const result = srs.grade(
+      body.cardId,
+      body.quality,
+      body.ms ?? 0,
+      body.given,
+    );
     return c.json(result);
   } catch (err) {
-    return c.json({ error: err instanceof Error ? err.message : 'grade failed' }, 400);
+    return c.json(
+      { error: err instanceof Error ? err.message : "grade failed" },
+      400,
+    );
   }
 });
 
-api.get('/stats', (c) => c.json(srs.stats()));
+api.get("/stats", (c) => c.json(srs.stats()));
 
-api.get('/trouble', (c) => {
-  const songId = c.req.query('songId') ? Number(c.req.query('songId')) : undefined;
+api.get("/trouble", (c) => {
+  const songId = c.req.query("songId")
+    ? Number(c.req.query("songId"))
+    : undefined;
   return c.json({
     lines: srs.troubleLines(songId),
     leeches: srs.queue({ leechesOnly: true, includeAhead: true, limit: 50 }),
@@ -941,10 +1028,10 @@ api.get('/trouble', (c) => {
   });
 });
 
-api.get('/mistakes', (c) => c.json({ patterns: srs.mistakePatterns() }));
+api.get("/mistakes", (c) => c.json({ patterns: srs.mistakePatterns() }));
 
 /** Every line of every song, shaded by how well it is known. The song map. */
-api.get('/songmap', (c) => c.json({ songs: srs.songMap() }));
+api.get("/songmap", (c) => c.json({ songs: srs.songMap() }));
 
 /**
  * Why a card keeps failing, in the user's own words or from a preset.
@@ -952,18 +1039,18 @@ api.get('/songmap', (c) => c.json({ songs: srs.songMap() }));
  * Asked after the third miss, when a plain "again" has clearly stopped being
  * useful, and read back on Today so the answer visibly changes something.
  */
-api.post('/cards/:id/reason', async (c) => {
-  const id = Number(c.req.param('id'));
+api.post("/cards/:id/reason", async (c) => {
+  const id = Number(c.req.param("id"));
   const body = await c.req
     .json<{ reason?: string; note?: string }>()
     .catch(() => ({}) as { reason?: string; note?: string });
-  if (!body.reason) return c.json({ error: 'reason is required' }, 400);
+  if (!body.reason) return c.json({ error: "reason is required" }, 400);
   srs.setCardReason(id, body.reason, body.note);
   return c.json({ ok: true });
 });
 
 /** Coarse playback accounting, so "listening this week" is real rather than a guess. */
-api.post('/listening', async (c) => {
+api.post("/listening", async (c) => {
   const body = await c.req
     .json<{ seconds?: number }>()
     .catch(() => ({}) as { seconds?: number });
@@ -971,26 +1058,35 @@ api.post('/listening', async (c) => {
   return c.json({ ok: true });
 });
 
-api.post('/cards/:id/mnemonic', async (c) => {
-  const id = Number(c.req.param('id'));
+api.post("/cards/:id/mnemonic", async (c) => {
+  const id = Number(c.req.param("id"));
   try {
     const mnemonic = await generateMnemonic(id);
-    if (!mnemonic) return c.json({ error: 'No AI provider configured', llm: llmStatus() }, 409);
+    if (!mnemonic)
+      return c.json(
+        { error: "No AI provider configured", llm: llmStatus() },
+        409,
+      );
     return c.json({ mnemonic });
   } catch (err) {
-    return c.json({ error: err instanceof Error ? err.message : 'failed' }, 500);
+    return c.json(
+      { error: err instanceof Error ? err.message : "failed" },
+      500,
+    );
   }
 });
 
-api.post('/cards/:id/suspend', async (c) => {
-  const id = Number(c.req.param('id'));
-  const body = await c.req.json<{ suspended?: boolean }>().catch(() => ({ suspended: true }));
+api.post("/cards/:id/suspend", async (c) => {
+  const id = Number(c.req.param("id"));
+  const body = await c.req
+    .json<{ suspended?: boolean }>()
+    .catch(() => ({ suspended: true }));
   srs.setSuspended(id, body.suspended ?? true);
   return c.json({ ok: true });
 });
 
-api.post('/cards/:id/clear-leech', (c) => {
-  srs.clearLeech(Number(c.req.param('id')));
+api.post("/cards/:id/clear-leech", (c) => {
+  srs.clearLeech(Number(c.req.param("id")));
   return c.json({ ok: true });
 });
 
@@ -1015,66 +1111,87 @@ function readWordRef(body: {
     reading: body.reading?.trim() || undefined,
     meaning: body.meaning?.trim() || undefined,
     lineText: body.lineText?.trim() || undefined,
-    songId: typeof body.songId === 'number' ? body.songId : undefined,
+    songId: typeof body.songId === "number" ? body.songId : undefined,
   };
 }
 
-api.get('/words/examples', (c) => {
-  const term = c.req.query('term')?.trim();
-  if (!term) return c.json({ error: 'term is required' }, 400);
-  return c.json({ examples: cachedExamples(term, c.req.query('reading') ?? '') });
+api.get("/words/examples", (c) => {
+  const term = c.req.query("term")?.trim();
+  if (!term) return c.json({ error: "term is required" }, 400);
+  return c.json({
+    examples: cachedExamples(term, c.req.query("reading") ?? ""),
+  });
 });
 
-api.post('/words/examples', async (c) => {
-  const body = await c.req.json<Parameters<typeof readWordRef>[0] & { force?: boolean }>();
+api.post("/words/examples", async (c) => {
+  const body = await c.req.json<
+    Parameters<typeof readWordRef>[0] & { force?: boolean }
+  >();
   const ref = readWordRef(body);
-  if (!ref) return c.json({ error: 'term is required' }, 400);
+  if (!ref) return c.json({ error: "term is required" }, 400);
 
   try {
     const result = await generateExamples(ref, { force: body.force === true });
     return c.json(result);
   } catch (err) {
     if (err instanceof LlmUnavailable) {
-      return c.json({ error: 'No AI provider configured', llm: llmStatus() }, 409);
+      return c.json(
+        { error: "No AI provider configured", llm: llmStatus() },
+        409,
+      );
     }
-    return c.json({ error: err instanceof Error ? err.message : 'failed' }, 502);
+    return c.json(
+      { error: err instanceof Error ? err.message : "failed" },
+      502,
+    );
   }
 });
 
-api.get('/words/questions', (c) => {
-  const term = c.req.query('term')?.trim();
-  if (!term) return c.json({ error: 'term is required' }, 400);
-  return c.json({ questions: questionHistory(term, c.req.query('reading') ?? '') });
+api.get("/words/questions", (c) => {
+  const term = c.req.query("term")?.trim();
+  if (!term) return c.json({ error: "term is required" }, 400);
+  return c.json({
+    questions: questionHistory(term, c.req.query("reading") ?? ""),
+  });
 });
 
-api.post('/words/ask', async (c) => {
-  const body = await c.req.json<Parameters<typeof readWordRef>[0] & { question?: string }>();
+api.post("/words/ask", async (c) => {
+  const body = await c.req.json<
+    Parameters<typeof readWordRef>[0] & { question?: string }
+  >();
   const ref = readWordRef(body);
-  if (!ref) return c.json({ error: 'term is required' }, 400);
-  if (!body.question?.trim()) return c.json({ error: 'question is required' }, 400);
+  if (!ref) return c.json({ error: "term is required" }, 400);
+  if (!body.question?.trim())
+    return c.json({ error: "question is required" }, 400);
 
   try {
     const result = await askAboutWord(ref, body.question);
     return c.json(result);
   } catch (err) {
     if (err instanceof LlmUnavailable) {
-      return c.json({ error: 'No AI provider configured', llm: llmStatus() }, 409);
+      return c.json(
+        { error: "No AI provider configured", llm: llmStatus() },
+        409,
+      );
     }
-    return c.json({ error: err instanceof Error ? err.message : 'failed' }, 502);
+    return c.json(
+      { error: err instanceof Error ? err.message : "failed" },
+      502,
+    );
   }
 });
 
-api.post('/words/:id/enroll', (c) => {
-  const card = srs.enrollWord(Number(c.req.param('id')));
-  if (!card) return c.json({ error: 'word not found' }, 404);
+api.post("/words/:id/enroll", (c) => {
+  const card = srs.enrollWord(Number(c.req.param("id")));
+  if (!card) return c.json({ error: "word not found" }, 404);
   return c.json({ card });
 });
 
 // --- dictionary & kana ------------------------------------------------------
 
-api.get('/lookup', async (c) => {
-  const term = c.req.query('term')?.trim();
-  if (!term) return c.json({ error: 'term is required' }, 400);
+api.get("/lookup", async (c) => {
+  const term = c.req.query("term")?.trim();
+  if (!term) return c.json({ error: "term is required" }, 400);
   const entries = dict().entriesFor(term);
   const kanji = [...term]
     .map((ch) => dict().kanji(ch))
@@ -1095,29 +1212,40 @@ api.get('/lookup', async (c) => {
  * here, so a caller cannot have hooks written for meanings and readings the
  * character does not have.
  */
-api.post('/kanji/mnemonics', async (c) => {
+api.post("/kanji/mnemonics", async (c) => {
   const body = await c.req.json<{ chars?: string[]; force?: boolean }>();
-  const chars = [...new Set((body.chars ?? []).flatMap((s) => [...String(s)]))].filter((ch) =>
-    /[一-龯]/.test(ch),
-  );
-  if (chars.length === 0) return c.json({ error: 'chars is required' }, 400);
-  if (chars.length > 8) return c.json({ error: 'too many characters in one request' }, 400);
+  const chars = [
+    ...new Set((body.chars ?? []).flatMap((s) => [...String(s)])),
+  ].filter((ch) => /[一-龯]/.test(ch));
+  if (chars.length === 0) return c.json({ error: "chars is required" }, 400);
+  if (chars.length > 8)
+    return c.json({ error: "too many characters in one request" }, 400);
 
   const facts: KanjiFacts[] = [];
   for (const char of chars) {
     const info = dict().kanji(char);
-    if (info) facts.push({ char, meanings: info.meanings, on: info.on, kun: info.kun });
+    if (info)
+      facts.push({ char, meanings: info.meanings, on: info.on, kun: info.kun });
   }
-  if (facts.length === 0) return c.json({ error: 'no such kanji in the dictionary' }, 404);
+  if (facts.length === 0)
+    return c.json({ error: "no such kanji in the dictionary" }, 404);
 
   try {
-    const mnemonics = await generateKanjiMnemonics(facts, { force: body.force === true });
+    const mnemonics = await generateKanjiMnemonics(facts, {
+      force: body.force === true,
+    });
     return c.json({ mnemonics });
   } catch (err) {
     if (err instanceof LlmUnavailable) {
-      return c.json({ error: 'No AI provider configured', llm: llmStatus() }, 409);
+      return c.json(
+        { error: "No AI provider configured", llm: llmStatus() },
+        409,
+      );
     }
-    return c.json({ error: err instanceof Error ? err.message : 'failed' }, 502);
+    return c.json(
+      { error: err instanceof Error ? err.message : "failed" },
+      502,
+    );
   }
 });
 
@@ -1127,17 +1255,20 @@ api.post('/kanji/mnemonics', async (c) => {
  * batch, and caches what comes back; the server caches the annotation itself,
  * so the same explanation is only ever parsed once.
  */
-api.post('/furigana', async (c) => {
+api.post("/furigana", async (c) => {
   const body = await c.req.json<{ texts?: unknown; songId?: number }>();
-  const texts = Array.isArray(body.texts) ? body.texts.filter((t) => typeof t === 'string') : null;
-  if (!texts) return c.json({ error: 'texts is required' }, 400);
-  if (texts.length > 200) return c.json({ error: 'too many texts in one request' }, 400);
+  const texts = Array.isArray(body.texts)
+    ? body.texts.filter((t) => typeof t === "string")
+    : null;
+  if (!texts) return c.json({ error: "texts is required" }, 400);
+  if (texts.length > 200)
+    return c.json({ error: "too many texts in one request" }, 400);
 
   // Quoting the song's Japanese has to agree with the reading shown in the lyrics
   // above, so when the caller says which song it is reading, that song's own
   // readings outrank the dictionary.
   let known: Map<string, string> | undefined;
-  if (typeof body.songId === 'number' && Number.isFinite(body.songId)) {
+  if (typeof body.songId === "number" && Number.isFinite(body.songId)) {
     known = songReadings(body.songId);
     known.set(KNOWN_SCOPE, String(body.songId));
   }
@@ -1150,14 +1281,14 @@ api.post('/furigana', async (c) => {
   return c.json({ segments });
 });
 
-api.post('/analyze-line', async (c) => {
+api.post("/analyze-line", async (c) => {
   const body = await c.req.json<{ text?: string }>();
-  if (!body.text?.trim()) return c.json({ error: 'text is required' }, 400);
+  if (!body.text?.trim()) return c.json({ error: "text is required" }, 400);
   const tokens = await tokenizeLine(body.text.trim());
   return c.json({ tokens });
 });
 
-api.post('/kana/seed', (c) => c.json(seedKatakanaDeck()));
+api.post("/kana/seed", (c) => c.json(seedKatakanaDeck()));
 
 // --- settings ---------------------------------------------------------------
 
@@ -1175,36 +1306,39 @@ function parseCached<T>(text: string, fallback: T): T {
  * as a bootstrap fallback. Null means imports run without length ranking.
  */
 function youtubeApiKey(): string | null {
-  return getSetting('youtube_api_key') ?? process.env.YOUTUBE_API_KEY ?? null;
+  return getSetting("youtube_api_key") ?? process.env.YOUTUBE_API_KEY ?? null;
 }
 
 const EXPOSED_SETTINGS = [
-  'llm_provider',
-  'gateway_model',
-  'daily_new_limit',
-  'reasoning_effort',
-  'llm_concurrency',
-  'auto_analyze',
+  "llm_provider",
+  "gateway_model",
+  "daily_new_limit",
+  "reasoning_effort",
+  "llm_concurrency",
+  "auto_analyze",
   // 'ai' (default) shows no reading until the model has decided one; 'dictionary'
   // shows the offline guess in the meantime.
-  'lyric_readings',
+  "lyric_readings",
 ] as const;
 
-api.get('/settings', (c) => {
+api.get("/settings", (c) => {
   const out: Record<string, string | null> = {};
   for (const k of EXPOSED_SETTINGS) out[k] = getSetting(k);
   // Never send either key back to the client; report only whether one is set.
-  out.gateway_api_key_set = getSetting('gateway_api_key') ? 'yes' : 'no';
-  out.youtube_api_key_set = getSetting('youtube_api_key') ? 'yes' : 'no';
+  out.gateway_api_key_set = getSetting("gateway_api_key") ? "yes" : "no";
+  out.youtube_api_key_set = getSetting("youtube_api_key") ? "yes" : "no";
   return c.json({ settings: out, llm: llmStatus() });
 });
 
-api.put('/settings', async (c) => {
+api.put("/settings", async (c) => {
   const body = await c.req.json<Record<string, string | null>>();
   for (const [k, v] of Object.entries(body)) {
-    if (![...EXPOSED_SETTINGS, 'gateway_api_key', 'youtube_api_key'].includes(k)) continue;
-    if (v === null || v === '') {
-      getDb().prepare('DELETE FROM settings WHERE k = ?').run(k);
+    if (
+      ![...EXPOSED_SETTINGS, "gateway_api_key", "youtube_api_key"].includes(k)
+    )
+      continue;
+    if (v === null || v === "") {
+      getDb().prepare("DELETE FROM settings WHERE k = ?").run(k);
     } else {
       setSetting(k, v);
     }
@@ -1219,7 +1353,7 @@ api.put('/settings', async (c) => {
  * small — this is the file the README says you can copy by hand; the endpoint
  * exists so the browser can do it for you.
  */
-api.get('/backup', (_c) => {
+api.get("/backup", (_c) => {
   const tmp = `${USER_DB}.snapshot-${process.pid}`;
   snapshotDatabase(getDb(), USER_DB, tmp);
   const bytes = readFileSync(tmp);
@@ -1228,12 +1362,12 @@ api.get('/backup', (_c) => {
   } catch {
     /* best effort cleanup */
   }
-  const now = new Date().toISOString().replace(/[-:T]/g, '');
+  const now = new Date().toISOString().replace(/[-:T]/g, "");
   const stamp = `${now.slice(0, 8)}-${now.slice(8, 14)}`; // YYYYMMDD-HHMMSS
   return new Response(new Uint8Array(bytes), {
     headers: {
-      'Content-Type': 'application/x-sqlite3',
-      'Content-Disposition': `attachment; filename="ongaku-${stamp}.db"`,
+      "Content-Type": "application/x-sqlite3",
+      "Content-Disposition": `attachment; filename="ongaku-${stamp}.db"`,
     },
   });
 });
@@ -1245,11 +1379,14 @@ api.get('/backup', (_c) => {
  * newer app is refused with 422 and the running database is unchanged. Older
  * schemas restore fine — migrations are idempotent and run at reopen.
  */
-api.post('/backup/restore', async (c) => {
+api.post("/backup/restore", async (c) => {
   const bytes = new Uint8Array(await c.req.arrayBuffer());
-  if (bytes.byteLength === 0) return c.json({ error: 'no file received' }, 400);
+  if (bytes.byteLength === 0) return c.json({ error: "no file received" }, 400);
   if (bytes.byteLength > 1_000_000_000) {
-    return c.json({ error: 'that file is implausibly large for a backup' }, 400);
+    return c.json(
+      { error: "that file is implausibly large for a backup" },
+      400,
+    );
   }
 
   // Staged next to the real file so the final swap is a same-filesystem rename.
@@ -1269,12 +1406,15 @@ api.post('/backup/restore', async (c) => {
   try {
     swapDatabase({ src: staged, path: USER_DB, reset: closeDb, reopen: getDb });
   } catch (err) {
-    return c.json({ error: err instanceof Error ? err.message : 'restore failed' }, 500);
+    return c.json(
+      { error: err instanceof Error ? err.message : "restore failed" },
+      500,
+    );
   }
 
   const counts = getDb()
     .query<{ songs: number; cards: number }, []>(
-      'SELECT (SELECT COUNT(*) FROM songs) AS songs, (SELECT COUNT(*) FROM cards) AS cards',
+      "SELECT (SELECT COUNT(*) FROM songs) AS songs, (SELECT COUNT(*) FROM cards) AS cards",
     )
     .get();
   return c.json({ ok: true, version: verdict.version, ...counts });

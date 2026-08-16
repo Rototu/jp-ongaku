@@ -1,5 +1,5 @@
-import { copyFileSync, renameSync, unlinkSync } from 'node:fs';
-import { Database } from 'bun:sqlite';
+import { copyFileSync, renameSync, unlinkSync } from "node:fs";
+import { Database } from "bun:sqlite";
 
 /**
  * Backup and restore of the user's database.
@@ -18,7 +18,9 @@ import { Database } from 'bun:sqlite';
  * endpoint — buys nothing here.
  */
 
-export type ValidateResult = { ok: true; version: number } | { ok: false; error: string };
+export type ValidateResult =
+  | { ok: true; version: number }
+  | { ok: false; error: string };
 
 /**
  * Checks that a file is an ongaku database this app can open.
@@ -27,28 +29,44 @@ export type ValidateResult = { ok: true; version: number } | { ok: false; error:
  * at all, so a text file or a truncated download fails here rather than at
  * reopen.
  */
-export function validateDatabase(path: string, appVersion: number): ValidateResult {
+export function validateDatabase(
+  path: string,
+  appVersion: number,
+): ValidateResult {
   let d: Database;
   try {
     d = new Database(path, { readonly: true });
   } catch {
-    return { ok: false, error: 'That file is not a database at all.' };
+    return { ok: false, error: "That file is not a database at all." };
   }
   try {
     let version: number;
     try {
       const row = d
-        .query<{ v: string }, []>("SELECT v FROM schema_meta WHERE k = 'version'")
+        .query<{ v: string }, []>(
+          "SELECT v FROM schema_meta WHERE k = 'version'",
+        )
         .get();
       if (!row) {
-        return { ok: false, error: 'That database has no schema version — it is not an ongaku backup.' };
+        return {
+          ok: false,
+          error:
+            "That database has no schema version — it is not an ongaku backup.",
+        };
       }
       version = Number(row.v);
     } catch {
-      return { ok: false, error: 'That database has no schema version — it is not an ongaku backup.' };
+      return {
+        ok: false,
+        error:
+          "That database has no schema version — it is not an ongaku backup.",
+      };
     }
     if (!Number.isFinite(version) || version < 1) {
-      return { ok: false, error: 'That database carries an unreadable schema version.' };
+      return {
+        ok: false,
+        error: "That database carries an unreadable schema version.",
+      };
     }
     if (version > appVersion) {
       return {
@@ -63,7 +81,11 @@ export function validateDatabase(path: string, appVersion: number): ValidateResu
       )
       .get();
     if (!songs) {
-      return { ok: false, error: 'That database is missing its songs table — not an ongaku backup.' };
+      return {
+        ok: false,
+        error:
+          "That database is missing its songs table — not an ongaku backup.",
+      };
     }
     return { ok: true, version };
   } finally {
@@ -72,8 +94,12 @@ export function validateDatabase(path: string, appVersion: number): ValidateResu
 }
 
 /** Checkpoints WAL back into the main file, then copies it. */
-export function snapshotDatabase(db: Database, path: string, dest: string): void {
-  db.exec('PRAGMA wal_checkpoint(TRUNCATE)');
+export function snapshotDatabase(
+  db: Database,
+  path: string,
+  dest: string,
+): void {
+  db.exec("PRAGMA wal_checkpoint(TRUNCATE)");
   copyFileSync(path, dest);
 }
 

@@ -1,12 +1,18 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { api, type LibrarySong } from '../lib/api';
-import { useAsync } from '../lib/useAsync';
-import { useCommands, useRail } from '../lib/shell';
-import { StreakCard } from '../components/StreakCard';
-import { Art, Pips, cardsInMinutes, duration, estimateMinutes } from '../components/bits';
-import { Furigana } from '../components/Furigana';
-import type { ReviewOptions } from './Review';
-import type { SongMapRow, Stats, TroubleCluster } from '../../../shared/types';
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { api, type LibrarySong } from "../lib/api";
+import { useAsync } from "../lib/useAsync";
+import { useCommands, useRail } from "../lib/shell";
+import { StreakCard } from "../components/StreakCard";
+import {
+  Art,
+  Pips,
+  cardsInMinutes,
+  duration,
+  estimateMinutes,
+} from "../components/bits";
+import { Furigana } from "../components/Furigana";
+import type { ReviewOptions } from "./Review";
+import type { SongMapRow, Stats, TroubleCluster } from "../../../shared/types";
 
 /**
  * Today — the answer to "what now".
@@ -19,7 +25,7 @@ import type { SongMapRow, Stats, TroubleCluster } from '../../../shared/types';
 /** The stretches of time a session is offered in, in minutes. */
 const SESSION_LENGTHS = [5, 15, 30, 60] as const;
 
-const LENGTH_KEY = 'jp-ongaku:session-minutes';
+const LENGTH_KEY = "jp-ongaku:session-minutes";
 
 /**
  * The session length, remembered between visits.
@@ -31,7 +37,9 @@ const LENGTH_KEY = 'jp-ongaku:session-minutes';
 function useSessionLength(): [number, (minutes: number) => void] {
   const [minutes, setMinutes] = useState<number>(() => {
     const stored = Number(localStorage.getItem(LENGTH_KEY));
-    return SESSION_LENGTHS.includes(stored as (typeof SESSION_LENGTHS)[number]) ? stored : 15;
+    return SESSION_LENGTHS.includes(stored as (typeof SESSION_LENGTHS)[number])
+      ? stored
+      : 15;
   });
 
   useEffect(() => {
@@ -78,7 +86,9 @@ export function Today({
         b.dueCards - a.dueCards ||
         b.id - a.id,
     );
-    return shuffled ? withWork[Math.floor(Math.random() * withWork.length)] : withWork[0];
+    return shuffled
+      ? withWork[Math.floor(Math.random() * withWork.length)]
+      : withWork[0];
   }, [library, shuffled]);
 
   const focusDetail = useAsync(
@@ -88,12 +98,12 @@ export function Today({
 
   const nextSection = useMemo(() => {
     const progress = focusDetail.data?.progress ?? [];
-    const pending = progress.find((v) => v.state !== 'done');
+    const pending = progress.find((v) => v.state !== "done");
     if (!pending) return null;
     return {
       number: pending.verseIdx + 1,
       lines: pending.lineCount,
-      done: progress.filter((v) => v.state === 'done').length,
+      done: progress.filter((v) => v.state === "done").length,
       total: progress.length,
     };
   }, [focusDetail.data]);
@@ -113,22 +123,40 @@ export function Today({
    */
   const cardBudget = cardsInMinutes(budget);
   const cards = Math.min(s?.dueNow ?? 0, cardBudget);
-  const minutes = Math.min(budget, estimateMinutes(cards, nextSection?.lines ?? 0));
+  const minutes = Math.min(
+    budget,
+    estimateMinutes(cards, nextSection?.lines ?? 0),
+  );
 
   const start = (title: string) => onReview({ title, limit: cardBudget });
 
   const rail = useRail(<StreakCard stats={s} />);
 
   useCommands([
-    { id: 'today-start', label: 'Start today’s setlist', where: 'Today', run: () => start('Today’s setlist') },
-    { id: 'today-shuffle', label: 'Shuffle the setlist', where: 'Today', run: () => setShuffled((v) => !v) },
+    {
+      id: "today-start",
+      label: "Start today’s setlist",
+      where: "Today",
+      run: () => start("Today’s setlist"),
+    },
+    {
+      id: "today-shuffle",
+      label: "Shuffle the setlist",
+      where: "Today",
+      run: () => setShuffled((v) => !v),
+    },
     ...SESSION_LENGTHS.map((len) => ({
       id: `today-length-${len}`,
       label: `Set the session to ${len} minutes`,
-      where: 'Today',
+      where: "Today",
       run: () => setBudget(len),
     })),
-    { id: 'today-new-song', label: 'Add a song', where: 'Today', run: onNewSong },
+    {
+      id: "today-new-song",
+      label: "Add a song",
+      where: "Today",
+      run: onNewSong,
+    },
   ]);
 
   return (
@@ -155,7 +183,9 @@ export function Today({
           <div className="row" style={{ gap: 10 }}>
             <span className="cap">Today’s setlist</span>
             <span className="pill">≈ {minutes} MIN</span>
-            {focus?.favourite && <span className="pill star">★ FAVOURITES FIRST</span>}
+            {focus?.favourite && (
+              <span className="pill star">★ FAVOURITES FIRST</span>
+            )}
           </div>
 
           <div className="row length-picker">
@@ -163,7 +193,7 @@ export function Today({
             {SESSION_LENGTHS.map((len) => (
               <button
                 key={len}
-                className={`chip dark${budget === len ? ' on' : ''}`}
+                className={`chip dark${budget === len ? " on" : ""}`}
                 onClick={() => setBudget(len)}
               >
                 {len} min
@@ -178,10 +208,10 @@ export function Today({
               what="Katakana look-alikes"
               how={
                 kana > 0
-                  ? `${kana} card${kana === 1 ? '' : 's'} due`
+                  ? `${kana} card${kana === 1 ? "" : "s"} due`
                   : health.data?.katakanaDeck === 0
-                    ? 'deck not seeded yet'
-                    : 'nothing due — skipped'
+                    ? "deck not seeded yet"
+                    : "nothing due — skipped"
               }
               fill={kana > 0 ? 100 : 0}
             />
@@ -190,33 +220,39 @@ export function Today({
               what="Mixed review"
               how={
                 mixed > 0
-                  ? `${mixed} card${mixed === 1 ? '' : 's'}${
-                      (s?.leeches ?? 0) > 0 ? ` · ${s?.leeches} are trouble` : ''
+                  ? `${mixed} card${mixed === 1 ? "" : "s"}${
+                      (s?.leeches ?? 0) > 0
+                        ? ` · ${s?.leeches} are trouble`
+                        : ""
                     }`
-                  : 'clear — nothing waiting'
+                  : "clear — nothing waiting"
               }
               fill={mixed > 0 ? 42 : 100}
               highlight={mixed > 0}
             />
             <TrackCard
-              cap={focus?.favourite ? 'TRACK 3 · ★ FROM YOUR FAVOURITES' : 'TRACK 3 · SOMETHING NEW'}
+              cap={
+                focus?.favourite
+                  ? "TRACK 3 · ★ FROM YOUR FAVOURITES"
+                  : "TRACK 3 · SOMETHING NEW"
+              }
               star={focus?.favourite}
               what={
                 nextSection && focus ? (
                   <>
-                    Section {nextSection.number} of{' '}
+                    Section {nextSection.number} of{" "}
                     <span className="jps">{focus.title}</span>
                   </>
                 ) : (
-                  'Nothing queued'
+                  "Nothing queued"
                 )
               }
               how={
                 nextSection
                   ? `${nextSection.lines} lines · ${nextSection.done} of ${nextSection.total} sections done`
                   : library.length === 0
-                    ? 'add a song and this fills in'
-                    : 'every section is finished'
+                    ? "add a song and this fills in"
+                    : "every section is finished"
               }
               fill={
                 nextSection && nextSection.total > 0
@@ -228,24 +264,25 @@ export function Today({
         </div>
 
         <div className="go">
-          <button className="start" onClick={() => start('Today’s setlist')}>
+          <button className="start" onClick={() => start("Today’s setlist")}>
             <span className="disp">Start the set</span>
             <small>
-              PRESS ⏎ · {cards} CARD{cards === 1 ? '' : 'S'} · {minutes} MIN
+              PRESS ⏎ · {cards} CARD{cards === 1 ? "" : "S"} · {minutes} MIN
             </small>
           </button>
           <button className="forest" onClick={() => setShuffled((v) => !v)}>
-            {shuffled ? 'Shuffled' : 'Shuffle it'}
+            {shuffled ? "Shuffled" : "Shuffle it"}
           </button>
         </div>
       </div>
 
       <div className="today-cols">
         <div className="stack">
-          <div className="page-head" style={{ alignItems: 'baseline' }}>
+          <div className="page-head" style={{ alignItems: "baseline" }}>
             <h3>Back to it</h3>
             <span className="faint" style={{ fontSize: 13 }}>
-              {library.length} song{library.length === 1 ? '' : 's'} in the library
+              {library.length} song{library.length === 1 ? "" : "s"} in the
+              library
             </span>
           </div>
 
@@ -267,9 +304,12 @@ export function Today({
             <div className="seed-banner">
               <span className="emoji">カ</span>
               <div style={{ flex: 1 }}>
-                <div style={{ fontWeight: 700 }}>The katakana deck is empty.</div>
-                <div style={{ fontSize: 13, color: 'var(--muted)' }}>
-                  Katakana is the shaky half for most people. Seeding it is worth five minutes a day.
+                <div style={{ fontWeight: 700 }}>
+                  The katakana deck is empty.
+                </div>
+                <div style={{ fontSize: 13, color: "var(--muted)" }}>
+                  Katakana is the shaky half for most people. Seeding it is
+                  worth five minutes a day.
                 </div>
               </div>
               <button
@@ -291,7 +331,7 @@ export function Today({
               <div style={{ fontWeight: 700 }}>
                 Add a song and it becomes a lesson in about a minute.
               </div>
-              <div style={{ fontSize: 13, color: 'var(--muted)' }}>
+              <div style={{ fontSize: 13, color: "var(--muted)" }}>
                 Type a title — we’ll find the lyrics and the timings ourselves.
               </div>
             </div>
@@ -318,7 +358,7 @@ export function Today({
             <div className="stat-tile">
               <div className="value">
                 {s?.accuracy7d === null || s?.accuracy7d === undefined
-                  ? '—'
+                  ? "—"
                   : Math.round(s.accuracy7d * 100)}
                 <small>%</small>
               </div>
@@ -327,7 +367,7 @@ export function Today({
                 <div
                   style={{
                     width: `${s?.accuracy7d ? s.accuracy7d * 100 : 0}%`,
-                    background: 'var(--lime)',
+                    background: "var(--lime)",
                   }}
                 />
               </div>
@@ -339,13 +379,16 @@ export function Today({
           {cluster ? (
             <TroubleCardView
               cluster={cluster}
-              onDrill={() => onReview({ leeches: true, title: 'Trouble drill' })}
+              onDrill={() =>
+                onReview({ leeches: true, title: "Trouble drill" })
+              }
             />
           ) : (
-            <div className="card flat">
+            <div className="card">
               <div className="cap">no troublemakers</div>
               <div style={{ marginTop: 4 }}>
-                Nothing has failed enough times to need its own drill. That is the good outcome.
+                Nothing has failed enough times to need its own drill. That is
+                the good outcome.
               </div>
             </div>
           )}
@@ -371,8 +414,8 @@ function TrackCard({
   star?: boolean;
 }) {
   return (
-    <div className={`track-card${highlight ? ' on' : ''}`}>
-      <div className={`cap${star ? ' star' : ''}`}>{cap}</div>
+    <div className={`track-card${highlight ? " on" : ""}`}>
+      <div className={`cap${star ? " star" : ""}`}>{cap}</div>
       <div className="what">{what}</div>
       <div className="how">{how}</div>
       <div className="bar">
@@ -397,7 +440,7 @@ function ContinueRow({
 }) {
   const known = map?.cells.filter((c) => c.mastery > 0).length ?? 0;
   return (
-    <div className={`continue-row${lead ? '' : ' quiet'}`}>
+    <div className={`continue-row${lead ? "" : " quiet"}`}>
       <Art quiet={!lead} youtubeId={song.youtubeId} seed={song.title} />
       <div className="who">
         <div className="title one-line" title={song.title}>
@@ -409,7 +452,7 @@ function ContinueRow({
         </div>
         <div className="row" style={{ gap: 9 }}>
           <span className="mono faint one-line" style={{ fontSize: 12 }}>
-            {song.titleRomaji ? `${song.titleRomaji} · ` : ''}
+            {song.titleRomaji ? `${song.titleRomaji} · ` : ""}
             {song.artist}
           </span>
           {song.favourite && <span className="tag loan">★ FAVOURITE</span>}
@@ -425,19 +468,21 @@ function ContinueRow({
       </div>
       <div className="row" style={{ gap: 10 }}>
         <button
-          className={`icon-star${song.favourite ? ' on' : ''}`}
+          className={`icon-star${song.favourite ? " on" : ""}`}
           onClick={onToggleFavourite}
           title={
             song.favourite
-              ? 'Favourited — its sections lead your setlist'
-              : 'Favourite this song'
+              ? "Favourited — its sections lead your setlist"
+              : "Favourite this song"
           }
         >
           ★
         </button>
-        {song.dueCards > 0 && <span className="tag new">{song.dueCards} DUE</span>}
-        <button className={lead ? 'dark' : ''} onClick={onOpen}>
-          {lead ? 'Resume ▸' : 'Open ▸'}
+        {song.dueCards > 0 && (
+          <span className="tag new">{song.dueCards} DUE</span>
+        )}
+        <button className={lead ? "dark" : ""} onClick={onOpen}>
+          {lead ? "Resume ▸" : "Open ▸"}
         </button>
       </div>
     </div>
@@ -449,23 +494,25 @@ function ListeningCard({ days }: { days: number[] }) {
   const peak = Math.max(1, ...days);
   return (
     <div className="week-chart">
-      <div className="cap" style={{ color: 'var(--sage-dim)' }}>
+      <div className="cap" style={{ color: "var(--sage-dim)" }}>
         Listening this week
       </div>
       <div className="bars">
         {days.map((sec, i) => (
           <div
             key={i}
-            className={i === days.length - 1 ? 'today' : ''}
+            className={i === days.length - 1 ? "today" : ""}
             style={{ height: `${Math.max(4, (sec / peak) * 100)}%` }}
             title={`${duration(sec)} on this day`}
           />
         ))}
       </div>
-      <div className="row" style={{ gap: 8, alignItems: 'baseline' }}>
-        <span className="total">{total > 0 ? duration(total) : '0m'}</span>
-        <span style={{ fontSize: 12, color: 'var(--sage-dim)' }}>
-          {total > 0 ? 'sung along, mostly badly' : 'play a song and this fills in'}
+      <div className="row" style={{ gap: 8, alignItems: "baseline" }}>
+        <span className="total">{total > 0 ? duration(total) : "0m"}</span>
+        <span style={{ fontSize: 12, color: "var(--sage-dim)" }}>
+          {total > 0
+            ? "sung along, mostly badly"
+            : "play a song and this fills in"}
         </span>
       </div>
     </div>
@@ -483,35 +530,50 @@ function TroubleCardView({
     <div className="trouble-card">
       <div>
         <span className="tag leech">
-          {cluster.lapses} MISS{cluster.lapses === 1 ? '' : 'ES'}
+          {cluster.lapses} MISS{cluster.lapses === 1 ? "" : "ES"}
         </span>
       </div>
       <div className="pair">
         {cluster.items.map((item, i) => (
-          <span key={i} style={{ display: 'inline-flex', gap: 12, alignItems: 'center' }}>
+          <span
+            key={i}
+            style={{ display: "inline-flex", gap: 12, alignItems: "center" }}
+          >
             {i > 0 && (
-              <span style={{ fontSize: 13, color: 'var(--faint)', fontWeight: 400 }}>vs</span>
+              <span
+                style={{ fontSize: 13, color: "var(--faint)", fontWeight: 400 }}
+              >
+                vs
+              </span>
             )}
             {item}
           </span>
         ))}
       </div>
-      <div style={{ fontSize: 13, color: 'var(--muted)' }}>{cluster.detail}</div>
+      <div style={{ fontSize: 13, color: "var(--muted)" }}>
+        {cluster.detail}
+      </div>
       {cluster.reason && (
         <>
-          <div style={{ fontSize: 13, color: 'var(--muted)' }}>You told us why:</div>
+          <div style={{ fontSize: 13, color: "var(--muted)" }}>
+            You told us why:
+          </div>
           <div className="quote">“{cluster.reason}”</div>
           <div className="fix">
             <span>💡</span>
             <div>
-              So the drill pairs them up instead of asking one at a time — the difference is the
-              thing to learn, not either half.
+              So the drill pairs them up instead of asking one at a time — the
+              difference is the thing to learn, not either half.
             </div>
           </div>
         </>
       )}
-      <button className="coral" style={{ alignSelf: 'flex-start' }} onClick={onDrill}>
-        {cluster.items.length > 1 ? 'Drill the pair ▸' : 'Drill it ▸'}
+      <button
+        className="coral"
+        style={{ alignSelf: "flex-start" }}
+        onClick={onDrill}
+      >
+        {cluster.items.length > 1 ? "Drill the pair ▸" : "Drill it ▸"}
       </button>
     </div>
   );
@@ -519,17 +581,19 @@ function TroubleCardView({
 
 function greeting(): string {
   const h = new Date().getHours();
-  if (h < 5) return 'Still up?';
-  if (h < 12) return 'Morning.';
-  if (h < 18) return 'Afternoon.';
-  return 'Evening.';
+  if (h < 5) return "Still up?";
+  if (h < 12) return "Morning.";
+  if (h < 18) return "Afternoon.";
+  return "Evening.";
 }
 
 function headline(due: number, hasSection: boolean): string {
-  if (due === 0 && !hasSection) return 'Nothing due. Go and listen to something.';
-  if (due === 0) return 'Nothing due — so let’s learn something new.';
-  if (!hasSection) return `${due} card${due === 1 ? '' : 's'}, then you’re done.`;
-  return 'Two tracks, then you’re done.';
+  if (due === 0 && !hasSection)
+    return "Nothing due. Go and listen to something.";
+  if (due === 0) return "Nothing due — so let’s learn something new.";
+  if (!hasSection)
+    return `${due} card${due === 1 ? "" : "s"}, then you’re done.`;
+  return "Two tracks, then you’re done.";
 }
 
 function blurb(
@@ -537,15 +601,17 @@ function blurb(
   focus: LibrarySong | undefined,
   linesLeft: number,
 ): string {
-  if (!s) return 'Working out what you should do next…';
+  if (!s) return "Working out what you should do next…";
   const parts: string[] = [];
   parts.push(
     s.dueNow > 0
-      ? `${s.dueNow} card${s.dueNow === 1 ? '' : 's'} ${s.dueNow === 1 ? 'is' : 'are'} pretending they’ve never met you.`
-      : 'Nothing is due, which means the schedule is working.',
+      ? `${s.dueNow} card${s.dueNow === 1 ? "" : "s"} ${s.dueNow === 1 ? "is" : "are"} pretending they’ve never met you.`
+      : "Nothing is due, which means the schedule is working.",
   );
   if (focus && linesLeft > 0) {
-    parts.push(`Also: you’re ${linesLeft} line${linesLeft === 1 ? '' : 's'} from finishing a section of ${focus.title}.`);
+    parts.push(
+      `Also: you’re ${linesLeft} line${linesLeft === 1 ? "" : "s"} from finishing a section of ${focus.title}.`,
+    );
   }
-  return parts.join(' ');
+  return parts.join(" ");
 }
