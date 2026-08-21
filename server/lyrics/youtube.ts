@@ -223,30 +223,18 @@ export function splitTitle(
 }
 
 /**
- * A split that came out looking wrong.
+ * Asks the model for the song and performer a lyrics database would file this
+ * upload under.
  *
- * Real uploads stack more than the conventions allow for — "Show Name Full
- * Opening 2 Lyrics | Song | Artist" has three segments and the rules above take
- * the first as the artist. The tells are a section name where a song should be, a
- * side still carrying separators or a "by", or either side being too long to be
- * anyone's name. Any of them and the model gets a turn.
- */
-function looksUnsure(split: { title: string; artist: string }): boolean {
-  const { title, artist } = split;
-  if (!title.trim()) return true;
-  if (title.length > 40 || artist.length > 40) return true;
-  if (/[|/／–—]|\bby\b|\bfeat\.?\b|\bft\.?\b/i.test(artist)) return true;
-  // A section of a show, not a song: the real title is elsewhere in the upload.
-  if (/^(opening|ending|op|ed|full|lyrics?|theme)\s*\d*$/i.test(title.trim())) return true;
-  return false;
-}
-
-/**
- * Asks the model to split a title the patterns above could not.
+ * The pattern rules below handle the tidy uploads, but most real ones are not
+ * tidy: "Opening FULL \"Stella\" by SEKAI NO OWARI · Show Name" has no
+ * separator the rules can trust, names the show as well as the song, and puts
+ * the performer after a "by". Sending the raw title straight to a lyrics search
+ * fails on exactly those, so the model gets the first turn whenever it is
+ * configured, and the deterministic split becomes the fallback.
  *
- * Uploads like "YOASOBI アイドル Official" have no separator at all, and the
- * model knows which half is the band. Returns null whenever the AI layer is off
- * or the answer is unusable, so this can never be the reason an import fails.
+ * Returns null whenever the AI layer is off or the answer is unusable, so this
+ * can never be the reason an import fails.
  */
 async function refineWithAi(
   rawTitle: string,
@@ -257,19 +245,24 @@ async function refineWithAi(
       `YouTube video title: ${JSON.stringify(rawTitle)}\n` +
         `Channel: ${JSON.stringify(channel)}\n\n` +
         'Return only JSON: {"title": "song title", "artist": "performer"}.\n' +
-        '- The title is the song, never the show it is from and never a section of it ' +
-        '("Opening", "OP2", "Ending").\n' +
-        '- The artist is the person or band performing, not the anime and not the uploader.\n' +
-        '- Keep the original script — do not translate or romanise. Where the upload gives ' +
-        'both a Japanese and a romanised title, use the Japanese one.\n' +
-        '- Drop upload noise like "Official MV", "Full Lyrics" or "歌詞付き".',
-      'You extract song metadata from video titles. You reply with JSON and nothing else.',
+        '- title and artist are what a music library would tag this recording as, ' +
+        'nothing more: no show name, no section ("Opening", "OP2", "Ending"), no ' +
+        'episode or track numbers, no upload noise ("Official MV", "Full", ' +
+        '"Lyrics", "歌詞付き"), no quotes or brackets around them.\n' +
+        '- The artist is the person or band performing, not the anime, film or game ' +
+        'it is from and not the uploader.\n' +
+        '- Keep the original script for title and artist. Where the upload gives both ' +
+        'a Japanese and a romanised name, use the Japanese one as the primary.\n' +
+        '- Never invent a song you do not recognise: if the upload only gives you ' +
+        'part of a name, return that part.',
+      'You extract song metadata from video titles for a lyrics database lookup. ' +
+        'You reply with JSON and nothing else.',
     );
     const parsed = extractJson<{ title?: unknown; artist?: unknown }>(text);
-    const title = typeof parsed.title === 'string' ? parsed.title.trim() : '';
-    const artist = typeof parsed.artist === 'string' ? parsed.artist.trim() : '';
+    const str = (v: unknown): string => (typeof v === 'string' ? v.trim() : '');
+    const title = str(parsed.title);
     if (!title) return null;
-    return { title, artist };
+    return { title, artist: str(parsed.artist) };
   } catch (err) {
     if (!(err instanceof LlmUnavailable)) {
       console.error('[youtube] title refinement failed:', err);
@@ -396,11 +389,13 @@ export async function resolve(
   const [split, durationSec] = await Promise.all([
     (async () => {
       const guess = splitTitle(rawTitle, channel);
-      if (guess.guessedBy !== 'channel' && !looksUnsure(guess)) return guess;
       const refined = await refineWithAi(rawTitle, channel);
-      return refined
-        ? { title: refined.title, artist: refined.artist || guess.artist, guessedBy: 'ai' as const }
-        : guess;
+      if (!refined) return guess;
+      return {
+        title: refined.title,
+        artist: refined.artist || guess.artist,
+        guessedBy: 'ai' as const,
+      };
     })(),
     opts.apiKey ? durationOf(videoId, opts.apiKey) : null,
   ]);
