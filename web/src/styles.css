@@ -2635,6 +2635,13 @@ rt {
  cursor: pointer;
  padding: 0 6px;
  border-radius: 14px;
+ /*
+  * Japanese wraps between any two characters, which would break a word across
+  * two lines — half its highlight on one line, half on the next, and the
+  * popover pointing at whichever half. An inline-block cannot be broken into,
+  * so the line breaks between words instead.
+  */
+ display: inline-block;
 }
 
 .stage .big .w.alt {
