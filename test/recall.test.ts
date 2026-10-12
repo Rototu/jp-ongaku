@@ -91,6 +91,37 @@ describe('recall cards', () => {
     expect(front).not.toContain(recall.back.reading!);
   });
 
+  test('a gloss that spells the answer is kept off the front', () => {
+    const db = getDb();
+    const now = new Date().toISOString();
+    const addWord = (lemma: string, reading: string, glosses: string[]) => {
+      const word = db
+        .query<{ id: number }, [string, string, string, string]>(
+          `INSERT INTO words (lemma, reading, romaji, furigana, glosses, pos, created_at)
+           VALUES (?, ?, '', '[]', ?, 'noun', ?) RETURNING id`,
+        )
+        .get(lemma, reading, JSON.stringify(glosses), now)!;
+      const card = db
+        .query<{ id: number }, [number, string, string]>(
+          `INSERT INTO cards (kind, word_id, dedupe_key, front, back, created_at)
+           VALUES ('vocab', ?, ?, '{}', '{}', ?) RETURNING id`,
+        )
+        .get(word.id, `vocab:${word.id}`, now)!;
+      db.prepare('INSERT INTO srs (card_id, due_at, interval_days) VALUES (?, ?, ?)').run(
+        card.id,
+        now,
+        RECALL_UNLOCK_DAYS,
+      );
+    };
+    addWord('寿司', 'すし', ['sushi', 'vinegared rice']);
+    addWord('カラオケ', 'カラオケ', ['karaoke']);
+
+    expect(unlockRecallCards()).toBe(1);
+    const [recall] = cardsOfKind('recall');
+    expect(recall.back.answer).toBe('寿司');
+    expect(recall.front.meaning).toBe('vinegared rice');
+  });
+
   test('a retired vocabulary card stays retired', async () => {
     await importSong();
     const vocab = cardsOfKind('vocab')[0];
