@@ -124,7 +124,7 @@ app.route('/api', api);
 const hasBuild = existsSync(join(DIST_DIR, 'index.html'));
 if (hasBuild) {
   app.use('/assets/*', serveStatic({ root: './dist' }));
-  app.get('/favicon.svg', serveStatic({ path: './dist/favicon.svg' }));
+  app.use('/icons/*', serveStatic({ root: './dist' }));
   // Single-page app: every unmatched route returns index.html.
   app.get('*', serveStatic({ path: './dist/index.html' }));
 } else {
