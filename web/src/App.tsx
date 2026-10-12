@@ -167,7 +167,9 @@ export function App() {
     <div className="app">
       <aside className="sidebar">
         <div className="brand">
-          <span className="note">♪</span>
+          <span className="note">
+            <img src="/icons/icon-64.png" alt="" />
+          </span>
           <div>
             <div className="name">jp-ongaku</div>
             <small>japanese through song</small>

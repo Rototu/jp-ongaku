@@ -3040,6 +3040,14 @@ rt {
  flex-shrink: 0;
 }
 
+/* The sloth sits in the lime tile, which stays the brand's colour. */
+.brand .note img,
+.review-head .note img {
+ width: 88%;
+ height: 88%;
+ object-fit: contain;
+}
+
 .review-head .body {
  flex: 1;
  display: flex;
