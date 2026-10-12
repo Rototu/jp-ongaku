@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { Database } from 'bun:sqlite';
+import { Db } from '../server/sqlite';
 import { _setDbForTests, getDb, setSetting } from '../server/db';
 import { buildLesson } from '../server/lesson/build';
 import { analyzeSong } from '../server/llm/analyze';
@@ -16,7 +16,7 @@ const LINES = Array.from({ length: 18 }, (_, i) => `夜空に星が光ってい�
 const FIXTURE = LINES.join('\n');
 
 beforeEach(() => {
-  _setDbForTests(new Database(':memory:'));
+  _setDbForTests(new Db(':memory:'));
   setSetting('gateway_api_key', 'test-key');
 });
 

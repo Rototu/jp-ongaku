@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { Database } from 'bun:sqlite';
+import { Db } from '../server/sqlite';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -35,7 +35,7 @@ const FIXTURE = ['夜空に星が光っている', '君の声を探している'
 let artifactDir: string;
 
 beforeEach(() => {
-  _setDbForTests(new Database(':memory:'));
+  _setDbForTests(new Db(':memory:'));
   artifactDir = mkdtempSync(join(tmpdir(), 'ongaku-no-artifact-'));
   _setMnemonicSourceForTests(
     join(artifactDir, 'absent.jsonl'),

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { Database } from 'bun:sqlite';
+import { Db } from '../server/sqlite';
 import { _setDbForTests } from '../server/db';
 import { buildLesson } from '../server/lesson/build';
 import { parsePlain } from '../server/lyrics/lrc';
@@ -18,7 +18,7 @@ import type { Card } from '../shared/types';
  */
 
 beforeEach(() => {
-  _setDbForTests(new Database(':memory:'));
+  _setDbForTests(new Db(':memory:'));
 });
 
 afterEach(() => {

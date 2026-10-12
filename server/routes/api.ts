@@ -6,10 +6,11 @@ import {
   nowIso,
   setSetting,
   closeDb,
+  userDbPath,
   SCHEMA_VERSION,
 } from "../db";
 import { snapshotDatabase, swapDatabase, validateDatabase } from "../backup";
-import { DATA_DIR, USER_DB } from "../paths";
+import { DATA_DIR, USER_DB, remoteDbConfig } from "../paths";
 import { dict } from "../dict";
 import * as lrclib from "../lyrics/lrclib";
 import * as youtube from "../lyrics/youtube";
@@ -1354,8 +1355,8 @@ api.put("/settings", async (c) => {
  * exists so the browser can do it for you.
  */
 api.get("/backup", (_c) => {
-  const tmp = `${USER_DB}.snapshot-${process.pid}`;
-  snapshotDatabase(getDb(), USER_DB, tmp);
+  const tmp = `${userDbPath()}.snapshot-${process.pid}`;
+  snapshotDatabase(getDb(), userDbPath(), tmp);
   const bytes = readFileSync(tmp);
   try {
     unlinkSync(tmp);
@@ -1380,6 +1381,17 @@ api.get("/backup", (_c) => {
  * schemas restore fine — migrations are idempotent and run at reopen.
  */
 api.post("/backup/restore", async (c) => {
+  // Swapping a file under a replica would not change the hosted database, and
+  // the next sync would put the old data straight back.
+  if (remoteDbConfig()) {
+    return c.json(
+      {
+        error:
+          "The database is online, so restoring a file here would be overwritten by the next sync. Restore it locally, then push it with `bun run db:push`.",
+      },
+      409,
+    );
+  }
   const bytes = new Uint8Array(await c.req.arrayBuffer());
   if (bytes.byteLength === 0) return c.json({ error: "no file received" }, 400);
   if (bytes.byteLength > 1_000_000_000) {

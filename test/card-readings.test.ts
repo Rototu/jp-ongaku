@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { Database } from 'bun:sqlite';
+import { Db } from '../server/sqlite';
 import { _setDbForTests, getDb } from '../server/db';
 import { buildLesson, lineFurigana, CLOZE_BLANK } from '../server/lesson/build';
 import {
@@ -21,7 +21,7 @@ import type { CardBack, CardFront } from '../shared/types';
 const FIXTURE = ['夜空に星が光っている', '君の声を探している'].join('\n');
 
 beforeEach(() => {
-  _setDbForTests(new Database(':memory:'));
+  _setDbForTests(new Db(':memory:'));
 });
 
 afterEach(() => {

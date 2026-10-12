@@ -9,3 +9,5 @@ config.local.json
 .DS_Store
 *.log
 data/shutdown.log
+.vercel
+.env*

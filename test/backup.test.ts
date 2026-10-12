@@ -11,6 +11,7 @@ import {
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { _setDbForTests, SCHEMA_VERSION } from "../server/db";
+import { Db } from "../server/sqlite";
 import {
   snapshotDatabase,
   swapDatabase,
@@ -33,8 +34,8 @@ afterAll(() => {
 });
 
 /** A database carrying this app's schema, built the way the app builds one. */
-function seedDb(path: string): Database {
-  const d = new Database(path, { create: true });
+function seedDb(path: string): Db {
+  const d = new Db(path);
   _setDbForTests(d); // migrate() runs here
   _setDbForTests(null);
   return d;

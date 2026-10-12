@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { Database } from 'bun:sqlite';
+import { Db } from '../server/sqlite';
 import { _setDbForTests, getDb } from '../server/db';
 import { buildLesson } from '../server/lesson/build';
 import { pruneMismatchedGrammarCards } from '../server/lesson/regrade-grammar';
@@ -114,7 +114,7 @@ describe('marker guard', () => {
 
 describe('generated grammar cards', () => {
   beforeEach(() => {
-    _setDbForTests(new Database(':memory:'));
+    _setDbForTests(new Db(':memory:'));
   });
 
   afterEach(() => {
@@ -199,7 +199,7 @@ describe('generated grammar cards', () => {
 
 describe('grammar cards are scoped to their song', () => {
   beforeEach(() => {
-    _setDbForTests(new Database(':memory:'));
+    _setDbForTests(new Db(':memory:'));
   });
 
   afterEach(() => {
