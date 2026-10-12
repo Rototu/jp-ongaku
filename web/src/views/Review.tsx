@@ -417,7 +417,9 @@ export function Review({
   return (
     <div className="review-page">
       <div className="review-head">
-        <span className="note">♪</span>
+        <span className="note">
+          <img src="/icons/icon-64.png" alt="" />
+        </span>
         <div className="body">
           <div className="row" style={{ gap: 9 }}>
             <span className="cap">
