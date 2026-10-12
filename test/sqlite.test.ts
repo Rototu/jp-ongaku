@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, test } from 'bun:test';
-import { Db } from '../server/sqlite';
+import { Db, readOnly } from '../server/sqlite';
 
 /**
  * The libSQL wrapper, held to the bun:sqlite behaviour the app was written
@@ -69,5 +69,29 @@ describe('the user-database driver', () => {
   test('RETURNING comes back through get', () => {
     const row = db.prepare<{ a: number }>('INSERT INTO t VALUES (?, ?) RETURNING a').get(7, 8);
     expect(row).toEqual({ a: 7 });
+  });
+});
+
+describe('what counts as a write', () => {
+  // A write misread as a read would sit unpushed in the replica.
+  test.each([
+    'SELECT * FROM cards',
+    '  select 1',
+    'PRAGMA foreign_keys',
+    'SELECT name FROM pragma_table_info(?)',
+  ])('read: %s', (sql) => {
+    expect(readOnly(sql)).toBe(true);
+  });
+
+  test.each([
+    'INSERT INTO t VALUES (1)',
+    'INSERT INTO words (lemma) VALUES (?) ON CONFLICT DO UPDATE SET x = 1 RETURNING id',
+    'UPDATE srs SET due_at = ?',
+    'DELETE FROM cards',
+    'PRAGMA foreign_keys = ON',
+    'CREATE TABLE x (a)',
+    'WITH a AS (SELECT 1) INSERT INTO t SELECT * FROM a',
+  ])('write: %s', (sql) => {
+    expect(readOnly(sql)).toBe(false);
   });
 });

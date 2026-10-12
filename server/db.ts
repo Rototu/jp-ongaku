@@ -21,7 +21,9 @@ export function getDb(): Db {
   // A replica manages its own journal; WAL is for a plain local file.
   if (!db.remote) db.exec("PRAGMA journal_mode = WAL");
   db.exec("PRAGMA foreign_keys = ON");
-  db.sync();
+  // Pull whatever the server has. Without a network this fails and the app
+  // carries on with the replica as it was; unpushed writes go up later.
+  db.trySync();
   migrate(db);
   return db;
 }

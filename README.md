@@ -248,9 +248,18 @@ online, they are stored in it too — see below.
 Your own data (`ongaku.db`, never the dictionaries) can live in a hosted
 [Turso](https://turso.tech) database instead, so it survives a lost laptop and
 follows you to another machine. The app still runs locally: a replica of the
-database is kept at `data/ongaku-online.db`, reads come from it, and writes go to
-Turso. The access token is the lock — anyone with it can read and write the
-database, so it stays in `.env.local` (git-ignored) and nowhere else.
+database is kept at `data/ongaku-online.db`, and reads and writes both happen
+there at local speed. New writes are pushed to Turso about two seconds after they
+stop, and on shutdown; the server's state is pulled in at startup. With no
+network the app carries on, and what it wrote goes up on the next successful push
+— nothing is lost by a crash or a flight.
+
+**One machine at a time.** Two machines writing between syncs would conflict.
+To switch machines, quit the app on the first (which pushes), then start it on
+the second (which pulls).
+
+The access token is the lock — anyone with it can read and write the database, so
+it stays in `.env.local` (git-ignored) and nowhere else.
 
 Set it up on the free Starter plan through Vercel, which provisions the database
 and hands over its credentials:

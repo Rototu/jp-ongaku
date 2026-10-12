@@ -1,4 +1,4 @@
-import { copyFileSync, renameSync, unlinkSync } from "node:fs";
+import { copyFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { Database } from "bun:sqlite";
 import type { Db } from "./sqlite";
 
@@ -103,16 +103,32 @@ export function validateDatabase(
   }
 }
 
-/** Checkpoints WAL back into the main file, then copies it. */
+/**
+ * Writes a complete copy of the user database to `dest`.
+ *
+ * A local file is checkpointed out of WAL and copied. A replica cannot be
+ * checkpointed by hand — its WAL frames are what sync tracks — so it is synced
+ * and then read out through SQLite itself, which sees the WAL the way a raw
+ * file copy would not.
+ */
 export function snapshotDatabase(
   db: Db,
   path: string,
   dest: string,
 ): void {
-  // A replica is brought up to date with the server first, so the copy is the
-  // hosted database as it stands rather than whatever this machine last saw.
-  if (db.remote) db.sync();
-  else db.exec("PRAGMA wal_checkpoint(TRUNCATE)");
+  if (db.remote) {
+    // Up to date with the server first, so the copy is the hosted database as
+    // it stands rather than whatever this machine last saw.
+    db.trySync();
+    const reader = new Database(path, { readonly: true });
+    try {
+      writeFileSync(dest, reader.serialize());
+    } finally {
+      reader.close();
+    }
+    return;
+  }
+  db.exec("PRAGMA wal_checkpoint(TRUNCATE)");
   copyFileSync(path, dest);
 }
 
