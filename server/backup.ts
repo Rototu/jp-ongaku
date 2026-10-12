@@ -35,7 +35,16 @@ export function validateDatabase(
 ): ValidateResult {
   let d: Database;
   try {
-    d = new Database(path, { readonly: true });
+    // Opened immutable: a backup is a copy of a WAL-mode file, and a plain
+    // read-only open of one fails outright because SQLite cannot create the
+    // -shm sidecar it wants. Immutable reads the main file as-is and leaves
+    // nothing next to it. The probe makes a non-database fail here, since an
+    // immutable open defers reading the header until the first query.
+    d = new Database(
+      `file:${path.replace(/[%?#]/g, encodeURIComponent)}?immutable=1`,
+      { readonly: true },
+    );
+    d.query("SELECT 1 FROM sqlite_master LIMIT 1").get();
   } catch {
     return { ok: false, error: "That file is not a database at all." };
   }
