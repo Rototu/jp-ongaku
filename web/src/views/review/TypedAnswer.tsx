@@ -14,10 +14,12 @@ export function TypedAnswer({
   autoFocus,
   disabled,
   onSubmit,
+  placeholder = "type the reading — romaji ok",
 }: {
   autoFocus: boolean;
   disabled: boolean;
   onSubmit: (raw: string) => void;
+  placeholder?: string;
 }) {
   const [value, setValue] = useState("");
 
@@ -38,7 +40,7 @@ export function TypedAnswer({
         className="jp-line"
         value={value}
         onChange={(e) => setValue(e.target.value)}
-        placeholder="type the reading — romaji ok"
+        placeholder={placeholder}
         autoFocus={autoFocus}
         autoComplete="off"
         autoCapitalize="off"

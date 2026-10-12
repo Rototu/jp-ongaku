@@ -1,6 +1,7 @@
 import { getDb, nowIso } from '../db';
 import { schedule, daysUntil, LEECH_THRESHOLD, MATURE_DAYS, freshState } from './sm2';
 import { lineFurigana } from '../lesson/build';
+import { unlockRecallCards } from './recall';
 import { lineRomaji, type AnalyzedToken } from '../nlp/tokenize';
 import type { FuriganaSegment } from '../../shared/types';
 import type {
@@ -285,6 +286,9 @@ export function grade(cardId: number, quality: number, ms = 0, given?: string): 
       given ?? null,
     );
   })();
+
+  // A vocabulary card that has just held long enough earns its recall card.
+  if (row.kind === 'vocab' && row.word_id !== null) unlockRecallCards(row.word_id);
 
   const updated = db.query<CardRow, [number]>(`${SELECT_CARD} WHERE c.id = ?`).get(cardId)!;
   return {

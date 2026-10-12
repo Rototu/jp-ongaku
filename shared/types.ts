@@ -1,6 +1,13 @@
 // Shared between server and web. Keep it free of runtime imports.
 
-export type CardKind = 'vocab' | 'grammar' | 'cloze' | 'listening' | 'kana' | 'kanji';
+export type CardKind =
+  | 'vocab'
+  | 'recall'
+  | 'grammar'
+  | 'cloze'
+  | 'listening'
+  | 'kana'
+  | 'kanji';
 
 export interface FuriganaSegment {
   /** Chunk of the surface form (may be kanji, kana, or punctuation). */
@@ -168,6 +175,8 @@ export interface CardFront {
   jp?: string;
   furigana?: FuriganaSegment[];
   romaji?: string;
+  /** Recall: the English meaning the user answers in Japanese. */
+  meaning?: string;
   /** Cloze: the line with the target replaced by a blank. */
   blankIdx?: number;
   audio?: { youtubeId: string; startMs: number; endMs: number } | null;

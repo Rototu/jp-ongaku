@@ -3163,6 +3163,15 @@ rt {
  font-size: 30px;
 }
 
+/* A recall card's question: the meaning, in English, to answer in Japanese. */
+.flashcard .big-meaning {
+ font-size: 28px;
+ font-weight: 700;
+ line-height: 1.35;
+ text-align: center;
+ margin: 14px 0 6px;
+}
+
 .flashcard .blank {
  display: inline-flex;
  align-items: flex-end;

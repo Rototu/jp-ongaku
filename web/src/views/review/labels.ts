@@ -18,6 +18,7 @@ export function ordinal(n: number): string {
 export function kindLabel(kind: CardKind): string {
   const labels: Record<CardKind, string> = {
     vocab: 'vocabulary',
+    recall: 'say it in Japanese',
     grammar: 'grammar',
     cloze: 'fill the blank',
     listening: 'listening',

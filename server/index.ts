@@ -17,6 +17,7 @@ import { refreshLessons } from './lesson/refresh';
 import { dict } from './dict';
 import { status as llmStatus } from './llm/provider';
 import { DATA_DIR, DIST_DIR, ensureDirs } from './paths';
+import { unlockRecallCards } from './srs/recall';
 
 const PORT = Number(process.env.PORT ?? 5272);
 
@@ -55,6 +56,12 @@ try {
   const reasked = backfillListeningPrompts();
   if (reasked > 0) {
     console.log(`  turned ${reasked} listening card${reasked === 1 ? '' : 's'} into meaning questions`);
+  }
+
+  // Words already past the bar before recall cards existed get theirs now.
+  const recalled = unlockRecallCards();
+  if (recalled > 0) {
+    console.log(`  unlocked ${recalled} recall card${recalled === 1 ? '' : 's'}`);
   }
 } catch (err) {
   console.error('[cards] reading backfill failed:', err);
