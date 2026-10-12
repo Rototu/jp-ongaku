@@ -108,6 +108,9 @@ re-explain the lines, re-time them, fix a title reading, toggle romaji.
 ### Card types
 
 - **Vocabulary** — word → meaning, with reading and romaji.
+- **Recall** — the meaning in English, the word typed back in Japanese (kana,
+  romaji or the headword itself). Unlocks once a word's vocabulary card has held
+  for three days, since producing a word is harder than reading it.
 - **Grammar** — what a pattern does, shown against a real line from a song.
 - **Cloze** — a line with one word blanked, four plausible choices.
 - **Listening** — the clip for one line plays, then you reveal the text. Needs a

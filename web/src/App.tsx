@@ -136,6 +136,13 @@ export function App() {
         run: () => go({ name: 'review', options: { kinds: ['kana'], title: 'Katakana drill' } }),
       },
       {
+        id: 'review-recall',
+        label: 'Recall only — English to Japanese',
+        where: 'Review',
+        run: () =>
+          go({ name: 'review', options: { kinds: ['recall'], title: 'Recall' } }),
+      },
+      {
         id: 'review-listening',
         label: 'Listening only',
         where: 'Review',

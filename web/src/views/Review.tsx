@@ -220,12 +220,16 @@ export function Review({
    * Cards whose answer is a reading, typed rather than picked.
    *
    * Vocab and cloze both ask for the reading of a word — typing it is active
-   * recall where multiple choice was recognition. A card without a reading on
-   * its back (an older cloze, say) falls back to the old behaviour untouched.
+   * recall where multiple choice was recognition. A recall card asks for the
+   * word itself from its meaning, and the reading is how it gets typed. A card
+   * without a reading on its back (an older cloze, say) falls back to the old
+   * behaviour untouched.
    */
   const typedReading = card?.back.reading ?? null;
+  const isRecall = card?.kind === "recall";
   const isTypedCard =
-    (card?.kind === "vocab" || card?.kind === "cloze") && typedReading !== null;
+    (card?.kind === "vocab" || card?.kind === "cloze" || isRecall) &&
+    typedReading !== null;
   // A typed card must not show the answer on its front: furigana and romaji
   // above the headword *are* the answer.
   const hidesReading = isTypedCard && card?.kind === "vocab";
@@ -258,10 +262,13 @@ export function Review({
     (raw: string) => {
       if (!typedReading) return;
       setTypedRaw(raw);
-      setTypedCheck(checkReading(typedReading, raw));
+      // On a recall card the headword itself, typed through an IME, is the
+      // best answer there is — it only fails a kana comparison for having kanji.
+      const exact = isRecall && raw.trim() === card?.back.answer;
+      setTypedCheck(checkReading(typedReading, exact ? typedReading : raw));
       setRevealed(true);
     },
-    [typedReading],
+    [typedReading, isRecall, card],
   );
 
   /**
@@ -468,6 +475,10 @@ export function Review({
 
           <div className="prompt">{card.front.prompt}</div>
 
+          {card.front.meaning && (
+            <div className="big-meaning">{card.front.meaning}</div>
+          )}
+
           {card.front.jp && (
             <div className={`big-jp${card.front.jp.length > 8 ? " line" : ""}`}>
               {card.front.furigana && !hidesReading ? (
@@ -617,6 +628,12 @@ export function Review({
             {isTypedCard && typedCheck && (
               <ReadingDiff check={typedCheck} expectedReading={typedReading!} />
             )}
+            {isRecall && typedCheck && !typedCheck.correct && (
+              <p className="faint" style={{ textAlign: "center", margin: 0 }}>
+                Another word with this meaning still counts — the check only
+                knows the one from the song, so grade yourself.
+              </p>
+            )}
             {missed ? (
               <div className="grade-row locked">
                 <p className="why">
@@ -742,7 +759,16 @@ export function Review({
             <span className="kbd">4</span>.
           </p>
         ) : isTypedCard ? (
-          <TypedAnswer autoFocus onSubmit={submitTyped} disabled={false} />
+          <TypedAnswer
+            autoFocus
+            onSubmit={submitTyped}
+            disabled={false}
+            placeholder={
+              isRecall
+                ? "say it — romaji ok"
+                : "type the reading — romaji ok"
+            }
+          />
         ) : (
           <div className="row" style={{ justifyContent: "center" }}>
             <button
