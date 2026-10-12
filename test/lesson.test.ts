@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { Database } from 'bun:sqlite';
+import { Db } from '../server/sqlite';
 import { _setDbForTests, getDb } from '../server/db';
 import { buildLesson } from '../server/lesson/build';
 import { seedKatakanaDeck } from '../server/lesson/kana-deck';
@@ -20,7 +20,7 @@ const FIXTURE = [
 ].join('\n');
 
 beforeEach(() => {
-  _setDbForTests(new Database(':memory:'));
+  _setDbForTests(new Db(':memory:'));
 });
 
 afterEach(() => {

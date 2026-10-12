@@ -5,7 +5,8 @@ lesson: every line broken into words with **furigana and romaji always on**,
 dictionary meanings, grammar notes, and a flashcard deck that drills whatever you
 keep forgetting.
 
-Everything runs and stays on your machine. No account, no cloud, no telemetry.
+Everything runs on your machine. No account, no telemetry — and no cloud, unless
+you choose to keep your progress in an [online database](#online-database).
 
 ---
 
@@ -239,7 +240,42 @@ licensing of what it was built from.
 | `data/raw/` | Cached dictionary downloads. Safe to delete. |
 
 Lyrics you import are stored locally for your own study and are never uploaded
-anywhere.
+anywhere. When the database is
+online, they are stored in it too — see below.
+
+### Online database
+
+Your own data (`ongaku.db`, never the dictionaries) can live in a hosted
+[Turso](https://turso.tech) database instead, so it survives a lost laptop and
+follows you to another machine. The app still runs locally: a replica of the
+database is kept at `data/ongaku-online.db`, reads come from it, and writes go to
+Turso. The access token is the lock — anyone with it can read and write the
+database, so it stays in `.env.local` (git-ignored) and nowhere else.
+
+Set it up on the free Starter plan through Vercel, which provisions the database
+and hands over its credentials:
+
+```bash
+bunx vercel login
+bunx vercel link
+bunx vercel integration add tursocloud/database --plan starter -m region=dub1
+bunx vercel env pull .env.local
+```
+
+`TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN` in the environment (Bun reads
+`.env.local` itself) switch the app to the online database. Then copy what you
+have up, once:
+
+```bash
+bun run db:push
+```
+
+`ongaku.db` is left exactly as it was, as an offline copy. Remove the two
+variables to go back to it. While online, **Download backup** still works;
+restoring a file from Settings is switched off, because the next sync would undo
+it — restore a backup with `bun run db:push path/to/backup.db --force` instead.
+Your AI Gateway key lives in the settings table, so it moves online with
+everything else.
 
 **The microphone**, if you turn on shadowing in stage mode, is read through the
 browser's analyser and nothing else: no audio is recorded, stored or sent. All the

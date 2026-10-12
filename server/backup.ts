@@ -1,5 +1,6 @@
 import { copyFileSync, renameSync, unlinkSync } from "node:fs";
 import { Database } from "bun:sqlite";
+import type { Db } from "./sqlite";
 
 /**
  * Backup and restore of the user's database.
@@ -104,11 +105,14 @@ export function validateDatabase(
 
 /** Checkpoints WAL back into the main file, then copies it. */
 export function snapshotDatabase(
-  db: Database,
+  db: Db,
   path: string,
   dest: string,
 ): void {
-  db.exec("PRAGMA wal_checkpoint(TRUNCATE)");
+  // A replica is brought up to date with the server first, so the copy is the
+  // hosted database as it stands rather than whatever this machine last saw.
+  if (db.remote) db.sync();
+  else db.exec("PRAGMA wal_checkpoint(TRUNCATE)");
   copyFileSync(path, dest);
 }
 

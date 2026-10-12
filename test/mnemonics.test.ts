@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { Database } from 'bun:sqlite';
+import { Db } from '../server/sqlite';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -46,7 +46,7 @@ beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), 'ongaku-mnemonics-'));
   jsonl = join(dir, 'kanji-mnemonics.jsonl');
   _setMnemonicSourceForTests(jsonl, join(dir, 'mnemonics.db'));
-  _setDbForTests(new Database(':memory:'));
+  _setDbForTests(new Db(':memory:'));
 });
 
 afterEach(() => {

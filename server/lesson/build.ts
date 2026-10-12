@@ -1,4 +1,4 @@
-import type { Database } from 'bun:sqlite';
+import type { Db } from '../sqlite';
 import type { AnalyzedToken } from '../nlp/tokenize';
 import { tokenizeLine, lineRomaji, lineKana } from '../nlp/tokenize';
 import { shouldEnroll } from '../nlp/priority';
@@ -311,7 +311,7 @@ function rawFromVerses(lines: { text: string; verse_idx: number }[]): string {
 }
 
 function materialize(
-  db: Database,
+  db: Db,
   songId: number,
   lineIds: number[],
   tokenized: AnalyzedToken[][],
@@ -580,7 +580,7 @@ function materialize(
  * them their history, so the condition has to be exact.
  */
 function pruneStale(
-  db: Database,
+  db: Db,
   songId: number,
   produced: { keys: Set<string>; wordLinks: Set<string> },
 ): { cardsPruned: number; linksPruned: number } {

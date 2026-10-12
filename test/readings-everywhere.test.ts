@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { Database } from 'bun:sqlite';
+import { Db } from '../server/sqlite';
 import { _setDbForTests, getDb } from '../server/db';
 import { buildLesson } from '../server/lesson/build';
 import * as srs from '../server/srs/store';
@@ -22,7 +22,7 @@ const FIXTURE = ['夜空に星が光っている', '君の声を探している'
 const hasKanji = (s: string) => /[一-鿿]/.test(s);
 
 beforeEach(() => {
-  _setDbForTests(new Database(':memory:'));
+  _setDbForTests(new Db(':memory:'));
 });
 
 afterEach(() => {

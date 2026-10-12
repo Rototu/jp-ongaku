@@ -17,6 +17,12 @@ through. What is left is one unlicensed lyric source and one small terms-of-serv
 breach, both of them cheap to change, neither of them urgent while the project is
 free.
 
+The optional online database does not change this. It is the user's own Turso
+database, under their own account and token, holding their own study copy — the
+same private copy as `ongaku.db`, kept somewhere else. It would change the moment
+*we* hosted one database for many users: then lyrics would be passing through a
+server of ours, which is exactly the situation this document is about.
+
 ## What the code does today
 
 | Call | What it is | Verdict |

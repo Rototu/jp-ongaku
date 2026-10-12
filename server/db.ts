@@ -1,5 +1,5 @@
-import { Database } from "bun:sqlite";
-import { USER_DB, ensureDirs } from "./paths";
+import { Db } from "./sqlite";
+import { REPLICA_DB, USER_DB, ensureDirs, remoteDbConfig } from "./paths";
 
 /**
  * The user's own database: songs, lessons, cards, review history, progress.
@@ -11,16 +11,24 @@ const SCHEMA_VERSION = 7;
 
 export { SCHEMA_VERSION };
 
-let db: Database | null = null;
+let db: Db | null = null;
 
-export function getDb(): Database {
+export function getDb(): Db {
   if (db) return db;
   ensureDirs();
-  db = new Database(USER_DB, { create: true });
-  db.exec("PRAGMA journal_mode = WAL");
+  const remote = remoteDbConfig();
+  db = new Db(remote ? REPLICA_DB : USER_DB, remote ?? {});
+  // A replica manages its own journal; WAL is for a plain local file.
+  if (!db.remote) db.exec("PRAGMA journal_mode = WAL");
   db.exec("PRAGMA foreign_keys = ON");
+  db.sync();
   migrate(db);
   return db;
+}
+
+/** The file behind getDb(): the replica when online, ongaku.db otherwise. */
+export function userDbPath(): string {
+  return remoteDbConfig() ? REPLICA_DB : USER_DB;
 }
 
 /**
@@ -31,7 +39,7 @@ export function getDb(): Database {
 export function closeDb(): void {
   if (!db) return;
   try {
-    db.exec("PRAGMA wal_checkpoint(TRUNCATE)");
+    if (!db.remote) db.exec("PRAGMA wal_checkpoint(TRUNCATE)");
     db.close();
   } catch {
     /* closing a handle that is somehow already gone is fine */
@@ -50,7 +58,7 @@ export function closeDb(): void {
  * the column is missing. The recorded version is now a record, not a gate; only
  * genuinely destructive steps should ever be gated on it.
  */
-function migrate(d: Database) {
+function migrate(d: Db) {
   d.exec(
     `CREATE TABLE IF NOT EXISTS schema_meta (k TEXT PRIMARY KEY, v TEXT NOT NULL)`,
   );
@@ -98,7 +106,7 @@ const MIGRATION_COLUMNS: Record<string, Record<string, string>> = {
 };
 
 /** Adds a column only when it isn't there yet, so migrations stay re-runnable. */
-function addColumn(d: Database, table: string, column: string) {
+function addColumn(d: Db, table: string, column: string) {
   const alter = MIGRATION_COLUMNS[table]?.[column];
   if (!alter) throw new Error(`unknown migration column: ${table}.${column}`);
   const cols = d
@@ -112,7 +120,7 @@ function addColumn(d: Database, table: string, column: string) {
  * v2: song and artist names get their own furigana/romaji, so a kanji title
  * like a song name is readable in the library without opening it.
  */
-function addTitleAnnotationColumns(d: Database) {
+function addTitleAnnotationColumns(d: Db) {
   addColumn(d, "songs", "title_furigana");
   addColumn(d, "songs", "title_romaji");
   addColumn(d, "songs", "artist_furigana");
@@ -123,7 +131,7 @@ function addTitleAnnotationColumns(d: Database) {
  * v3: AI segmentation of each line — coloured chunks with their own reading,
  * meaning and explanation — cached alongside the line's translation.
  */
-function addChunkColumn(d: Database) {
+function addChunkColumn(d: Db) {
   addColumn(d, "line_analysis", "chunks");
 }
 
@@ -133,7 +141,7 @@ function addChunkColumn(d: Database) {
  * what the song is about. The generated-example and question caches arrive in
  * the same version but live in createBaseSchema, since they are whole tables.
  */
-function addSongContextColumn(d: Database) {
+function addSongContextColumn(d: Db) {
   addColumn(d, "songs", "context");
 }
 
@@ -142,7 +150,7 @@ function addSongContextColumn(d: Database) {
  * library. The `card_reasons` table arrives in the same version but lives in
  * createBaseSchema, since it is a whole table.
  */
-function addFavouriteColumn(d: Database) {
+function addFavouriteColumn(d: Db) {
   addColumn(d, "songs", "favourite");
 }
 
@@ -154,11 +162,11 @@ function addFavouriteColumn(d: Database) {
  * connected that row back to the の in the lyrics, so the bar under the word
  * could never find its own SRS state. Recording the surface closes the gap.
  */
-function addSeenAsColumn(d: Database) {
+function addSeenAsColumn(d: Db) {
   addColumn(d, "word_songs", "seen_as");
 }
 
-function createBaseSchema(d: Database) {
+function createBaseSchema(d: Db) {
   d.exec(`
     CREATE TABLE IF NOT EXISTS songs (
       id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -372,7 +380,7 @@ export function setSetting(key: string, value: string): void {
 }
 
 /** Test hook: point the module at a scratch database. */
-export function _setDbForTests(instance: Database | null) {
+export function _setDbForTests(instance: Db | null) {
   db = instance;
   if (instance) {
     instance.exec("PRAGMA foreign_keys = ON");
