@@ -3,7 +3,7 @@ import { serveStatic } from 'hono/bun';
 import { appendFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { api } from './routes/api';
-import { getDb } from './db';
+import { closeDb, getDb } from './db';
 import { backfillTitles } from './lesson/titles';
 import {
   backfillCardReadings,
@@ -183,9 +183,8 @@ function recordShutdown(signal: string): void {
   try {
     // Fold the write-ahead log back into the database file, so an interrupted
     // run never leaves the library in a half-checkpointed state.
-    const db = getDb();
-    db.exec('PRAGMA wal_checkpoint(TRUNCATE)');
-    db.close();
+    // Online, this also pushes any writes still waiting to go up.
+    closeDb();
   } catch {
     // Ditto.
   }
