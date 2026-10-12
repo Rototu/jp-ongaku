@@ -1,5 +1,6 @@
 import { getDb, nowIso } from '../db';
 import { freshState } from './sm2';
+import { normalizeReading, typedToKana } from '../../shared/kana';
 import type { CardBack, CardFront, FuriganaSegment } from '../../shared/types';
 
 /**
@@ -86,12 +87,19 @@ export function unlockRecallCards(wordId?: number): number {
   db.transaction(() => {
     for (const row of rows) {
       const glosses = parse<string[]>(row.glosses, []);
-      if (glosses.length === 0) continue;
+      // A gloss that is the word in romaji — "sushi" for 寿司, "karaoke" for
+      // カラオケ — is the answer printed on the question. Those go, and a word
+      // with nothing else to say for itself gets no recall card.
+      const reading = normalizeReading(row.reading);
+      const clues = glosses.filter(
+        (g) => normalizeReading(typedToKana(g.toLowerCase())) !== reading,
+      );
+      if (clues.length === 0) continue;
       // The front carries the meaning and nothing else: no headword, no ruby,
       // no romaji. Any of those is the answer.
       const front: CardFront = {
         prompt: PROMPT,
-        meaning: glosses.slice(0, 3).join('; '),
+        meaning: clues.slice(0, 3).join('; '),
       };
       const back: CardBack = {
         answer: row.lemma,
