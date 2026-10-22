@@ -45,6 +45,7 @@ import type {
   FuriganaSegment,
   GrammarNote,
   LineAnalysis,
+  LyricSource,
   Song,
   SongDetail,
   SongLine,
@@ -192,7 +193,9 @@ api.get("/youtube/resolve", async (c) => {
 
 api.post("/songs/import", async (c) => {
   const body = await c.req.json<{
-    lrclibId?: number;
+    /** A search hit to import, as the provider and its own id. */
+    provider?: string;
+    id?: number;
     title?: string;
     artist?: string;
     album?: string;
@@ -204,13 +207,18 @@ api.post("/songs/import", async (c) => {
   const youtubeId = parseYoutubeId(body.youtubeId);
   const context = body.context?.trim() || null;
 
-  if (body.lrclibId) {
+  if (body.provider !== undefined || body.id !== undefined) {
+    const { provider, id } = body;
+    if (!providers.isProviderId(provider) || !Number.isInteger(id)) {
+      return c.json({ error: "provider and id must name a search hit" }, 400);
+    }
+    const label = providers.providerLabel(provider);
     let fetched: FetchedLyrics;
     try {
-      fetched = await providers.fetchLyrics("lrclib", body.lrclibId);
+      fetched = await providers.fetchLyrics(provider, id as number);
     } catch (err) {
       const msg =
-        err instanceof NotFound ? "not found on LRCLIB" : String(err);
+        err instanceof NotFound ? `not found on ${label}` : String(err);
       return c.json({ error: `Could not fetch lyrics: ${msg}` }, 502);
     }
     if (!hasJapanese(fetched.raw)) {
@@ -226,8 +234,8 @@ api.post("/songs/import", async (c) => {
       title: fetched.title,
       artist: fetched.artist,
       album: fetched.album,
-      source: "lrclib",
-      lrclibId: fetched.id,
+      source: fetched.provider,
+      sourceId: fetched.id,
       durationMs: fetched.durationMs,
       youtubeId,
       context,
@@ -236,11 +244,11 @@ api.post("/songs/import", async (c) => {
     });
     // Explain the song right away rather than waiting for the user to ask.
     const job = jobs.maybeAutoAnalyze(result.songId);
-    // LRCLIB lengths are crowdsourced and sometimes belong to a different cut of
+    // Provider lengths are crowdsourced and sometimes belong to a different cut of
     // the song. Say so rather than silently shipping a scrub bar that ends early.
     const notice =
       fetched.statedDurationMs !== null && fetched.durationMs !== null
-        ? `LRCLIB listed this entry as ${clockSec(fetched.statedDurationMs)}, but its timings run to ${clockSec(fetched.durationMs)} — the full lyrics were imported and the length corrected.`
+        ? `${label} listed this entry as ${clockSec(fetched.statedDurationMs)}, but its timings run to ${clockSec(fetched.durationMs)} — the full lyrics were imported and the length corrected.`
         : null;
     return c.json({ ...result, analysis: job, notice });
   }
@@ -317,7 +325,7 @@ function toSong(row: SongRow, lineCount: number, verseCount: number): Song {
     artistFurigana: parseSegments(row.artist_furigana),
     artistRomaji: row.artist_romaji || null,
     album: row.album,
-    source: row.source as "lrclib" | "paste",
+    source: row.source as LyricSource,
     context: row.context,
     youtubeId: row.youtube_id,
     durationMs: row.duration_ms,

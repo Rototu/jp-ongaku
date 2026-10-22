@@ -7,6 +7,7 @@ import type {
   FuriganaSegment,
   KanjiMnemonic,
   LlmStatus,
+  LyricProviderId,
   MistakePattern,
   Song,
   SongDetail,
@@ -58,6 +59,8 @@ export interface Health {
 }
 
 export interface SearchHit {
+  provider: LyricProviderId;
+  /** The provider's own id, unique only together with `provider`. */
   id: number;
   trackName: string;
   artistName: string;
@@ -215,10 +218,10 @@ export const api = {
       `/youtube/resolve?url=${encodeURIComponent(url)}`,
     ),
 
-  importFromLrclib: (lrclibId: number, youtubeId?: string, context?: string) =>
+  importHit: (hit: Pick<SearchHit, 'provider' | 'id'>, youtubeId?: string, context?: string) =>
     request<ImportResult>('/songs/import', {
       method: 'POST',
-      body: JSON.stringify({ lrclibId, youtubeId, context }),
+      body: JSON.stringify({ provider: hit.provider, id: hit.id, youtubeId, context }),
     }),
 
   importPasted: (input: {

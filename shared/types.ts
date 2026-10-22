@@ -120,6 +120,12 @@ export interface GrammarNote {
   jlpt: number | null;
 }
 
+/** A lyric database the app can search and import from. */
+export type LyricProviderId = 'lrclib';
+
+/** Where a song's lyrics came from: a provider, or the user's own paste. */
+export type LyricSource = LyricProviderId | 'paste';
+
 export interface Song {
   id: number;
   title: string;
@@ -130,7 +136,7 @@ export interface Song {
   artistFurigana: FuriganaSegment[] | null;
   artistRomaji: string | null;
   album: string | null;
-  source: 'lrclib' | 'paste';
+  source: LyricSource;
   /**
    * Anything the user pasted to help the model: an interview, a fan reading,
    * the plot of the anime it belongs to. Null when they gave none.

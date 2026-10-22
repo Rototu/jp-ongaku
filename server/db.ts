@@ -7,7 +7,7 @@ import { REPLICA_DB, USER_DB, ensureDirs, remoteDbConfig } from "./paths";
  * back up by hand.
  */
 
-const SCHEMA_VERSION = 7;
+const SCHEMA_VERSION = 8;
 
 export { SCHEMA_VERSION };
 
@@ -73,6 +73,7 @@ function migrate(d: Db) {
   // v6 adds the kanji_mnemonics table, which createBaseSchema above already
   // covers — a new table needs no step of its own.
   addSeenAsColumn(d); // v7
+  addSourceIdColumn(d); // v8
 
   d.prepare("INSERT OR REPLACE INTO schema_meta (k, v) VALUES (?, ?)").run(
     "version",
@@ -97,6 +98,7 @@ const MIGRATION_COLUMNS: Record<string, Record<string, string>> = {
     context: "ALTER TABLE songs ADD COLUMN context TEXT",
     favourite:
       "ALTER TABLE songs ADD COLUMN favourite INTEGER NOT NULL DEFAULT 0",
+    source_id: "ALTER TABLE songs ADD COLUMN source_id INTEGER",
   },
   line_analysis: {
     chunks:
@@ -166,6 +168,20 @@ function addFavouriteColumn(d: Db) {
  */
 function addSeenAsColumn(d: Db) {
   addColumn(d, "word_songs", "seen_as");
+}
+
+/**
+ * v8: the provider's own id for the song, read together with `source`.
+ *
+ * Lyrics used to come only from LRCLIB, so the id lived in `lrclib_id`. With
+ * more than one provider the id means nothing without the provider beside it.
+ * `lrclib_id` stays for old rows and is copied across here.
+ */
+function addSourceIdColumn(d: Db) {
+  addColumn(d, "songs", "source_id");
+  d.exec(
+    "UPDATE songs SET source_id = lrclib_id WHERE source_id IS NULL AND lrclib_id IS NOT NULL",
+  );
 }
 
 function createBaseSchema(d: Db) {

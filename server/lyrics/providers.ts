@@ -1,7 +1,8 @@
+import type { LyricProviderId } from '../../shared/types';
 import { lrclib } from './lrclib';
 import { rankHits, toFetched, type FetchedLyrics, type LyricHit, type LyricRecord } from './rank';
 
-export type ProviderId = 'lrclib';
+export type ProviderId = LyricProviderId;
 
 /**
  * One lyric database.
