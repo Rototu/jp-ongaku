@@ -12,7 +12,8 @@ import {
 import { snapshotDatabase, swapDatabase, validateDatabase } from "../backup";
 import { DATA_DIR, USER_DB, remoteDbConfig } from "../paths";
 import { dict } from "../dict";
-import * as lrclib from "../lyrics/lrclib";
+import * as providers from "../lyrics/providers";
+import { hasJapanese, NotFound, type FetchedLyrics, type LyricHit } from "../lyrics/rank";
 import * as youtube from "../lyrics/youtube";
 import { parseLrc, parsePlain } from "../lyrics/lrc";
 import { buildLesson } from "../lesson/build";
@@ -85,7 +86,7 @@ api.get("/health", (c) => {
  * A list of bare-kanji titles is unreadable for someone who does not read kanji,
  * which is the whole audience — so this happens before they have to choose.
  */
-async function annotateHits(hits: lrclib.LrclibHit[]) {
+async function annotateHits(hits: LyricHit[]) {
   return Promise.all(
     hits.map(async (hit) => {
       const [title, artistName] = await Promise.all([
@@ -109,7 +110,7 @@ api.get("/search", async (c) => {
   const duration = Number(c.req.query("duration"));
   if (!q) return c.json({ error: "q is required" }, 400);
   try {
-    const hits = await lrclib.search(
+    const hits = await providers.search(
       q,
       artist || undefined,
       Number.isFinite(duration) && duration > 0 ? duration : null,
@@ -155,13 +156,13 @@ api.get("/youtube/resolve", async (c) => {
   // Widen the query only as far as needed: stop at the first candidate that
   // returns Japanese lyrics, since anything else is unusable for studying. One
   // candidate failing should not hide what the others find.
-  let hits: lrclib.LrclibHit[] = [];
+  let hits: LyricHit[] = [];
   let failure: unknown = null;
   let anySucceeded = false;
   for (const candidate of youtube.searchCandidates(video)) {
-    let found: lrclib.LrclibHit[];
+    let found: LyricHit[];
     try {
-      found = await lrclib.search(
+      found = await providers.search(
         candidate.q,
         candidate.artist,
         video.durationSec,
@@ -204,15 +205,15 @@ api.post("/songs/import", async (c) => {
   const context = body.context?.trim() || null;
 
   if (body.lrclibId) {
-    let fetched: lrclib.FetchedLyrics;
+    let fetched: FetchedLyrics;
     try {
-      fetched = await lrclib.fetchById(body.lrclibId);
+      fetched = await providers.fetchLyrics("lrclib", body.lrclibId);
     } catch (err) {
       const msg =
-        err instanceof lrclib.NotFound ? "not found on LRCLIB" : String(err);
+        err instanceof NotFound ? "not found on LRCLIB" : String(err);
       return c.json({ error: `Could not fetch lyrics: ${msg}` }, 502);
     }
-    if (!lrclib.hasJapanese(fetched.raw)) {
+    if (!hasJapanese(fetched.raw)) {
       return c.json(
         {
           error:
@@ -226,7 +227,7 @@ api.post("/songs/import", async (c) => {
       artist: fetched.artist,
       album: fetched.album,
       source: "lrclib",
-      lrclibId: fetched.lrclibId,
+      lrclibId: fetched.id,
       durationMs: fetched.durationMs,
       youtubeId,
       context,
@@ -251,7 +252,7 @@ api.post("/songs/import", async (c) => {
       400,
     );
   }
-  if (!lrclib.hasJapanese(lyrics)) {
+  if (!hasJapanese(lyrics)) {
     return c.json({ error: "Those lyrics contain no Japanese script." }, 422);
   }
 

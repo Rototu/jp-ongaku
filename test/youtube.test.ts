@@ -6,7 +6,7 @@ import {
   splitTitle,
   videoIdFrom,
 } from '../server/lyrics/youtube';
-import { rankHits, type LrclibRecord } from '../server/lyrics/lrclib';
+import { rankHits, type LyricRecord } from '../server/lyrics/rank';
 
 /**
  * Turning a pasted link into a song to import.
@@ -124,12 +124,13 @@ describe('lyric search candidates', () => {
 });
 
 /** Two entries for one song: the full cut and a TV-size edit of the same words. */
-function record(id: number, lastSec: number, lines = 4): LrclibRecord {
+function record(id: number, lastSec: number, lines = 4): LyricRecord {
   const stamps = Array.from({ length: lines }, (_, i) => {
     const at = Math.round((lastSec * (i + 1)) / lines);
     return `[${String(Math.floor(at / 60)).padStart(2, '0')}:${String(at % 60).padStart(2, '0')}.00] 夜空に星が光る ${i}`;
   });
   return {
+    provider: 'lrclib',
     id,
     trackName: 'Test Song',
     artistName: 'Test Artist',
@@ -164,7 +165,8 @@ describe('ranking against the video length', () => {
   });
 
   test('Japanese script and timings still outrank a closer length', () => {
-    const closeButEnglish: LrclibRecord = {
+    const closeButEnglish: LyricRecord = {
+      provider: 'lrclib',
       id: 3,
       trackName: 'Test Song',
       artistName: 'Test Artist',
