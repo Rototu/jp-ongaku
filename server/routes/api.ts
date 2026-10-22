@@ -96,6 +96,7 @@ async function annotateHits(hits: LyricHit[]) {
       ]);
       return {
         ...hit,
+        providerLabel: providers.providerLabel(hit.provider),
         titleFurigana: title?.furigana ?? null,
         titleRomaji: title?.romaji ?? null,
         artistFurigana: artistName?.furigana ?? null,

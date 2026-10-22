@@ -43,7 +43,7 @@ That serves the UI on <http://localhost:5273> and proxies the API to 5272.
 ## How a lesson gets built
 
 1. **Lyrics.** You type a title; the app searches [LRCLIB](https://lrclib.net), an
-   open crowdsourced lyrics API. Japanese-script results with time-synced lyrics
+   open crowdsourced lyrics API, and NetEase Cloud Music at the same time. Japanese-script results with time-synced lyrics
    rank first, because synced lyrics give karaoke playback for free. If nothing
    good turns up, paste the lyrics yourself — the paste box also accepts `.lrc`
    files with timestamps.
@@ -145,7 +145,7 @@ the frame is left alone so YouTube's scrubber, captions and fullscreen still wor
 
 ### Sing-along and timings
 
-Attach a YouTube link to a song. If LRCLIB supplied synced lyrics, lines highlight
+Attach a YouTube link to a song. If the lyrics came with timings, lines highlight
 in time immediately. If not, hit **Tap to time the lines** and press `space` as
 each line starts — timings save locally and unlock listening cards.
 
@@ -303,7 +303,7 @@ made no outbound request at all.
 ```
 server/
   nlp/        tokenizer, furigana alignment, romaji, priority scoring, grammar patterns
-  lyrics/     LRCLIB client, LRC parsing, verse grouping
+  lyrics/     lyric providers (LRCLIB, NetEase), ranking, LRC parsing, verse grouping
   lesson/     lesson builder, katakana deck, title annotation
   srs/        SM-2 scheduler, queue, stats, trouble reports
   llm/        provider adapter and the explanation layer

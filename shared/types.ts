@@ -121,7 +121,7 @@ export interface GrammarNote {
 }
 
 /** A lyric database the app can search and import from. */
-export type LyricProviderId = 'lrclib';
+export type LyricProviderId = 'lrclib' | 'netease';
 
 /** Where a song's lyrics came from: a provider, or the user's own paste. */
 export type LyricSource = LyricProviderId | 'paste';

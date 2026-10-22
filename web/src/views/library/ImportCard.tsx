@@ -16,7 +16,7 @@ export function isYoutubeLink(text: string): boolean {
 /**
  * The one-field import.
  *
- * A title is enough: LRCLIB is searched for it, Japanese results with timings
+ * A title is enough: every lyric provider is searched for it, Japanese results with timings
  * rank first, and everything else — video, notes, hand-pasted lyrics — is a chip
  * away and editable later.
  *
@@ -254,7 +254,7 @@ export function ImportCard({ onImported }: { onImported: (r: ImportResult) => vo
                 <div className="mono" style={{ fontSize: 11.5, color: 'var(--muted)' }}>
                   {hit.titleRomaji ? `${hit.titleRomaji} · ` : ''}
                   {hit.artistName}
-                  {/* The lyrics' own span is the honest length: LRCLIB's duration
+                  {/* The lyrics' own span is the honest length: a provider's duration
                       field is crowdsourced and sometimes describes another cut. */}
                   {hit.lyricSpanSec
                     ? ` · ${formatDuration(hit.lyricSpanSec)} of lyrics`
@@ -279,6 +279,7 @@ export function ImportCard({ onImported }: { onImported: (r: ImportResult) => vo
                 <span className="tag">NOT JAPANESE</span>
               )}
               {hit.hasSynced && <span className="tag ink">TIMED</span>}
+              <span className="tag">{hit.providerLabel.toUpperCase()}</span>
               {hit.durationMismatch && hit.duration && (
                 <span
                   className="tag loan"
@@ -321,7 +322,7 @@ export function ImportCard({ onImported }: { onImported: (r: ImportResult) => vo
   );
 }
 
-/** The escape hatch: LRCLIB has never heard of it, so type it in yourself. */
+/** The escape hatch: no provider has heard of it, so type it in yourself. */
 function PastePane({
   youtube,
   context,

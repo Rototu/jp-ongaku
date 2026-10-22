@@ -1,5 +1,6 @@
 import type { LyricProviderId } from '../../shared/types';
 import { lrclib } from './lrclib';
+import { netease } from './netease';
 import { rankHits, toFetched, type FetchedLyrics, type LyricHit, type LyricRecord } from './rank';
 
 export type ProviderId = LyricProviderId;
@@ -20,7 +21,7 @@ export interface LyricProvider {
   get(id: number): Promise<LyricRecord>;
 }
 
-const PROVIDERS: Record<ProviderId, LyricProvider> = { lrclib };
+const PROVIDERS: Record<ProviderId, LyricProvider> = { lrclib, netease };
 
 export function isProviderId(value: unknown): value is ProviderId {
   return typeof value === 'string' && Object.hasOwn(PROVIDERS, value);

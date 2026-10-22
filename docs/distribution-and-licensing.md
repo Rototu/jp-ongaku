@@ -30,6 +30,7 @@ server of ours, which is exactly the situation this document is about.
 | `youtube.com/oembed` — [`server/lyrics/youtube.ts`](../server/lyrics/youtube.ts) | Official public oEmbed endpoint, no key, built for third parties | Fine |
 | `googleapis.com/youtube/v3` — [`server/lyrics/youtube.ts`](../server/lyrics/youtube.ts) | Official Data API, `videos.list` with `part=contentDetails`, for the runtime | Fine; bring-your-own key, free quota |
 | `lrclib.net/api` — [`server/lyrics/lrclib.ts`](../server/lyrics/lrclib.ts) | Free crowdsourced lyric database, no key, **no publisher licences** | The real exposure |
+| `music.163.com/api` — [`server/lyrics/netease.ts`](../server/lyrics/netease.ts) | NetEase Cloud Music's unofficial web-player endpoints, no key, **no publisher licences** for lyrics | Same exposure as LRCLIB, plus no published terms for third-party use |
 | `ai-gateway.vercel.sh` — [`server/llm/provider.ts`](../server/llm/provider.ts) | Hardcoded gateway; lyrics reach a model provider through it | Fine today, wants to be configurable |
 
 No captions are ripped from YouTube anywhere, which is the thing that would have
@@ -62,9 +63,10 @@ The honest read: while this is a free project, LRCLIB is what everyone uses and
 nobody is bothered. The moment money attaches, it becomes the thing to change.
 Licensed alternatives are Musixmatch, Genius, and LyricFind.
 
-The design implication is small and worth doing early regardless: make the lyric
-source pluggable, so LRCLIB and a licensed provider are both just providers
-behind one interface, and switching is configuration rather than surgery.
+The lyric source is now pluggable. Each provider implements `LyricProvider` in
+[`server/lyrics/providers.ts`](../server/lyrics/providers.ts), so a licensed
+provider is one more adapter and dropping LRCLIB or NetEase is one line in the
+registry. NetEase sits in the same class as LRCLIB and goes when LRCLIB does.
 
 ## Where the legal lines actually fall
 
