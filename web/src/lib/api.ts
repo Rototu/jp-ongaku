@@ -62,6 +62,7 @@ export interface SearchHit {
   provider: LyricProviderId;
   /** The provider's own id, unique only together with `provider`. */
   id: number;
+  providerLabel: string;
   trackName: string;
   artistName: string;
   albumName: string | null;
