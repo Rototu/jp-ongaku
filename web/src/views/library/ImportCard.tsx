@@ -38,6 +38,8 @@ export function ImportCard({ onImported }: { onImported: (r: ImportResult) => vo
   const [youtube, setYoutube] = useState('');
   const [context, setContext] = useState('');
   const [video, setVideo] = useState<YoutubeMeta | null>(null);
+  // What the last search was for, so the paste pane opens already filled in.
+  const [seed, setSeed] = useState<PasteSeed>({ title: '', artist: '' });
 
   const pasted = isYoutubeLink(query);
 
@@ -51,23 +53,27 @@ export function ImportCard({ onImported }: { onImported: (r: ImportResult) => vo
       if (pasted) {
         const res = await api.resolveYoutube(query.trim());
         setVideo(res.video);
+        setSeed({ title: res.video.title, artist: res.video.artist });
         // The link is the video now: no reason to make them paste it twice.
         setYoutube(res.video.videoId);
         setHits(res.hits);
-        if (res.error) setError(res.error);
-        else if (res.hits.length === 0) {
+        if (res.error) {
+          setError(res.error);
+          setShowPaste(true);
+        } else if (res.hits.length === 0) {
           setError(
             `Read the video as “${res.video.title}” by ${res.video.artist || 'unknown'}, but found no lyrics for it. ` +
-              'Try typing the title instead, or paste the lyrics.',
+              'Paste the lyrics below, or try typing the title instead.',
           );
           setShowPaste(true);
         }
       } else {
         setVideo(null);
+        setSeed({ title: query.trim(), artist: '' });
         const res = await api.search(query.trim());
         setHits(res.hits);
         if (res.hits.length === 0) {
-          setError('Nothing found. Try the Japanese title, or paste the lyrics instead.');
+          setError('Nothing found. Paste the lyrics below, or try the Japanese title.');
           setShowPaste(true);
         }
       }
@@ -313,6 +319,9 @@ export function ImportCard({ onImported }: { onImported: (r: ImportResult) => vo
 
       {showPaste && (
         <PastePane
+          // Remounts on a new search so the fields follow it.
+          key={`${seed.title}\n${seed.artist}`}
+          seed={seed}
           youtube={youtube}
           context={context}
           onImported={onImported}
@@ -323,17 +332,24 @@ export function ImportCard({ onImported }: { onImported: (r: ImportResult) => vo
 }
 
 /** The escape hatch: no provider has heard of it, so type it in yourself. */
+interface PasteSeed {
+  title: string;
+  artist: string;
+}
+
 function PastePane({
+  seed,
   youtube,
   context,
   onImported,
 }: {
+  seed: PasteSeed;
   youtube: string;
   context: string;
   onImported: (r: ImportResult) => void;
 }) {
-  const [title, setTitle] = useState('');
-  const [artist, setArtist] = useState('');
+  const [title, setTitle] = useState(seed.title);
+  const [artist, setArtist] = useState(seed.artist);
   const [lyrics, setLyrics] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
