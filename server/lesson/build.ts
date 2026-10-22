@@ -10,7 +10,8 @@ import { freshState } from '../srs/sm2';
 import type { ParsedLine } from '../lyrics/lrc';
 import { groupVerses } from '../lyrics/lrc';
 import { annotate } from './titles';
-import type { CardBack, CardFront, FuriganaSegment } from '../../shared/types';
+import type { CardBack, CardFront, FuriganaSegment, LyricSource } from '../../shared/types';
+import { isProviderId } from '../lyrics/providers';
 
 /**
  * Turns raw lyric lines into a stored lesson: tokenised lines, deduplicated
@@ -24,8 +25,9 @@ export interface BuildInput {
   title: string;
   artist: string;
   album?: string | null;
-  source: 'lrclib' | 'paste';
-  lrclibId?: number | null;
+  source: LyricSource;
+  /** The provider's own id; absent for pasted lyrics. */
+  sourceId?: number | null;
   durationMs?: number | null;
   youtubeId?: string | null;
   /** Free-text background the user pasted, handed to the model at analysis. */
@@ -130,7 +132,7 @@ export async function buildLesson(input: BuildInput): Promise<BuildResult> {
     if (existing) {
       songId = existing.id;
       db.prepare(
-        `UPDATE songs SET album = ?, source = ?, lrclib_id = COALESCE(?, lrclib_id),
+        `UPDATE songs SET album = ?, source = ?, source_id = COALESCE(?, source_id),
          duration_ms = COALESCE(?, duration_ms), youtube_id = COALESCE(?, youtube_id), synced = ?,
          title_furigana = ?, title_romaji = ?, artist_furigana = ?, artist_romaji = ?,
          context = COALESCE(?, context)
@@ -138,7 +140,7 @@ export async function buildLesson(input: BuildInput): Promise<BuildResult> {
       ).run(
         input.album ?? null,
         input.source,
-        input.lrclibId ?? null,
+        input.sourceId ?? null,
         input.durationMs ?? null,
         input.youtubeId ?? null,
         input.lines.some((l) => l.timeMs !== null) ? 1 : 0,
@@ -160,7 +162,7 @@ export async function buildLesson(input: BuildInput): Promise<BuildResult> {
     } else {
       const res = db
         .prepare(
-          `INSERT INTO songs (title, artist, album, source, lrclib_id, youtube_id, duration_ms, synced, analyzed, created_at,
+          `INSERT INTO songs (title, artist, album, source, source_id, youtube_id, duration_ms, synced, analyzed, created_at,
                               title_furigana, title_romaji, artist_furigana, artist_romaji, context)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?)`,
         )
@@ -169,7 +171,7 @@ export async function buildLesson(input: BuildInput): Promise<BuildResult> {
           input.artist,
           input.album ?? null,
           input.source,
-          input.lrclibId ?? null,
+          input.sourceId ?? null,
           input.youtubeId ?? null,
           input.durationMs ?? null,
           input.lines.some((l) => l.timeMs !== null) ? 1 : 0,
@@ -257,14 +259,14 @@ export async function rebuildLesson(songId: number): Promise<BuildResult | null>
         artist: string;
         album: string | null;
         source: string;
-        lrclib_id: number | null;
+        source_id: number | null;
         duration_ms: number | null;
         youtube_id: string | null;
         context: string | null;
       },
       [number]
     >(
-      `SELECT id, title, artist, album, source, lrclib_id, duration_ms, youtube_id, context
+      `SELECT id, title, artist, album, source, source_id, duration_ms, youtube_id, context
        FROM songs WHERE id = ?`,
     )
     .get(songId);
@@ -286,8 +288,8 @@ export async function rebuildLesson(songId: number): Promise<BuildResult | null>
     title: song.title,
     artist: song.artist,
     album: song.album,
-    source: song.source === 'lrclib' ? 'lrclib' : 'paste',
-    lrclibId: song.lrclib_id,
+    source: isProviderId(song.source) ? song.source : 'paste',
+    sourceId: song.source_id,
     durationMs: song.duration_ms,
     youtubeId: song.youtube_id,
     context: song.context,

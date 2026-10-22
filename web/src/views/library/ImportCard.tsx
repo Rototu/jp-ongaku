@@ -30,7 +30,7 @@ export function ImportCard({ onImported }: { onImported: (r: ImportResult) => vo
   const [hits, setHits] = useState<SearchHit[] | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [importingId, setImportingId] = useState<number | null>(null);
+  const [importingKey, setImportingKey] = useState<string | null>(null);
 
   const [showVideo, setShowVideo] = useState(false);
   const [showContext, setShowContext] = useState(false);
@@ -79,11 +79,11 @@ export function ImportCard({ onImported }: { onImported: (r: ImportResult) => vo
   };
 
   const importHit = async (hit: SearchHit) => {
-    setImportingId(hit.id);
+    setImportingKey(hitKey(hit));
     setError(null);
     try {
-      const res = await api.importFromLrclib(
-        hit.id,
+      const res = await api.importHit(
+        hit,
         youtube.trim() || undefined,
         context.trim() || undefined,
       );
@@ -91,7 +91,7 @@ export function ImportCard({ onImported }: { onImported: (r: ImportResult) => vo
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Import failed');
     } finally {
-      setImportingId(null);
+      setImportingKey(null);
     }
   };
 
@@ -235,7 +235,7 @@ export function ImportCard({ onImported }: { onImported: (r: ImportResult) => vo
           {hits.map((hit, i) => (
             <div
               className={`hit${i === 0 && hit.japanese ? ' first' : ''}${hit.japanese ? '' : ' dim'}`}
-              key={hit.id}
+              key={hitKey(hit)}
             >
               <Art
                 quiet={!hit.japanese}
@@ -299,10 +299,10 @@ export function ImportCard({ onImported }: { onImported: (r: ImportResult) => vo
                   primary action made the others look inert. */}
               <button
                 className="dark"
-                disabled={importingId !== null}
+                disabled={importingKey !== null}
                 onClick={() => importHit(hit)}
               >
-                {importingId === hit.id ? 'Building lesson…' : 'Make lesson ▸'}
+                {importingKey === hitKey(hit) ? 'Building lesson…' : 'Make lesson ▸'}
               </button>
             </div>
           ))}
@@ -400,6 +400,8 @@ function PastePane({
     </form>
   );
 }
+
+const hitKey = (hit: SearchHit) => `${hit.provider}:${hit.id}`;
 
 export function formatDuration(seconds: number): string {
   const m = Math.floor(seconds / 60);
