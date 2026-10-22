@@ -58,14 +58,30 @@ export function hasJapanese(text: string | null | undefined): boolean {
   return !!text && JAPANESE_RE.test(text);
 }
 
+/**
+ * LRCLIB answers 503 "ServerOverloaded" when an uncached search runs past about
+ * a second, which is common for Japanese queries it has not seen before. The
+ * query keeps running and is cached, so the same request a moment later usually
+ * succeeds in well under that.
+ */
+const RETRY_STATUSES = new Set([429, 502, 503, 504]);
+const RETRY_DELAYS_MS = [700, 1500, 3000];
+
 async function get<T>(path: string): Promise<T> {
-  const res = await fetch(`${BASE}${path}`, {
-    headers: { 'User-Agent': UA, Accept: 'application/json' },
-    signal: AbortSignal.timeout(TIMEOUT_MS),
-  });
-  if (res.status === 404) throw new NotFound();
-  if (!res.ok) throw new Error(`LRCLIB responded ${res.status}`);
-  return (await res.json()) as T;
+  for (let attempt = 0; ; attempt++) {
+    const res = await fetch(`${BASE}${path}`, {
+      headers: { 'User-Agent': UA, Accept: 'application/json' },
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+    });
+    if (res.status === 404) throw new NotFound();
+    if (RETRY_STATUSES.has(res.status) && attempt < RETRY_DELAYS_MS.length) {
+      await res.body?.cancel();
+      await new Promise((r) => setTimeout(r, RETRY_DELAYS_MS[attempt]));
+      continue;
+    }
+    if (!res.ok) throw new Error(`LRCLIB responded ${res.status}`);
+    return (await res.json()) as T;
+  }
 }
 
 export class NotFound extends Error {

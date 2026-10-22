@@ -152,32 +152,41 @@ api.get("/youtube/resolve", async (c) => {
     );
   }
 
-  try {
-    // Widen the query only as far as needed: stop at the first candidate that
-    // returns Japanese lyrics, since anything else is unusable for studying.
-    let hits: lrclib.LrclibHit[] = [];
-    for (const candidate of youtube.searchCandidates(video)) {
-      const found = await lrclib.search(
+  // Widen the query only as far as needed: stop at the first candidate that
+  // returns Japanese lyrics, since anything else is unusable for studying. One
+  // candidate failing should not hide what the others find.
+  let hits: lrclib.LrclibHit[] = [];
+  let failure: unknown = null;
+  let anySucceeded = false;
+  for (const candidate of youtube.searchCandidates(video)) {
+    let found: lrclib.LrclibHit[];
+    try {
+      found = await lrclib.search(
         candidate.q,
         candidate.artist,
         video.durationSec,
       );
-      if (found.some((h) => h.japanese)) {
-        hits = found;
-        break;
-      }
-      if (hits.length === 0) hits = found;
+    } catch (err) {
+      failure = err;
+      continue;
     }
-    return c.json({ video, hits: await annotateHits(hits) });
-  } catch (err) {
+    anySucceeded = true;
+    if (found.some((h) => h.japanese)) {
+      hits = found;
+      break;
+    }
+    if (hits.length === 0) hits = found;
+  }
+  if (!anySucceeded && failure) {
     // The video resolved; only the lyric search failed. Hand back what we have
     // so the user can search by hand instead of starting over.
     return c.json({
       video,
       hits: [],
-      error: `Lyrics search unavailable: ${err instanceof Error ? err.message : "unknown error"}`,
+      error: `Lyrics search unavailable: ${failure instanceof Error ? failure.message : "unknown error"}`,
     });
   }
+  return c.json({ video, hits: await annotateHits(hits) });
 });
 
 api.post("/songs/import", async (c) => {
