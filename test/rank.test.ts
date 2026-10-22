@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { lyricSpanMs, rankHits, sanitizedDurationMs, type LrclibRecord } from '../server/lyrics/lrclib';
+import { lyricSpanMs, rankHits, sanitizedDurationMs, type LyricRecord } from '../server/lyrics/rank';
 
 /**
  * LRCLIB is crowdsourced, so a song arrives as several entries whose metadata
@@ -14,8 +14,9 @@ const SYNCED_NO_INTRO = ['[00:30.00]あさ', '[01:50.00]ひかり', '[03:38.00]�
 /** Same timings as SYNCED_FULL to within hundredths — a true duplicate. */
 const SYNCED_FULL_JITTER = ['[00:10.04]あさ', '[01:29.96]ひかり', '[03:18.02]おわり'].join('\n');
 
-function record(over: Partial<LrclibRecord> = {}): LrclibRecord {
+function record(over: Partial<LyricRecord> = {}): LyricRecord {
   return {
+    provider: 'lrclib',
     id: 1,
     trackName: 'Track',
     artistName: 'Artist',
