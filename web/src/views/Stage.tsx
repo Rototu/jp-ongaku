@@ -62,7 +62,12 @@ export function Stage({
 }) {
   /** Which line the stage is showing. Follows playback until the user steps. */
   const [manualIdx, setManualIdx] = useState<number | null>(null);
-  const idx = manualIdx ?? Math.max(0, activeIdx);
+  /**
+   * The line being looped and the passes left. Pinned to an index because the
+   * active line flips ahead of the line's end, which would drag the loop along.
+   */
+  const [loop, setLoop] = useState<{ idx: number; left: number } | null>(null);
+  const idx = loop?.idx ?? manualIdx ?? Math.max(0, activeIdx);
   const line = lines[idx] ?? null;
 
   const [hovered, setHovered] = useState<number | null>(null);
@@ -70,8 +75,6 @@ export function Stage({
   const [pinned, setPinned] = useState<number | null>(null);
   /** One switch for every word of English on the stage: translation, literal, notes. */
   const [showEnglish, setShowEnglish] = useState(true);
-  const [looping, setLooping] = useState(false);
-  const [loopsLeft, setLoopsLeft] = useState(LOOP_TIMES);
   const [kanji, setKanji] = useState<Record<string, KanjiInfo[]>>({});
   /** Characters whose hooks are being written right now, for the waiting note. */
   const [writing, setWriting] = useState<Set<string>>(new Set());
@@ -155,27 +158,39 @@ export function Stage({
   }, [idx]);
 
   // --- loop the current line ------------------------------------------------
+  const looping = loop !== null;
   useEffect(() => {
-    if (!looping || start === null || end === null || !player) return;
+    if (!loop || start === null || end === null || !player) return;
     const timer = setInterval(() => {
-      const now = player.currentMs();
-      if (now >= end - 60) {
-        if (loopsLeft <= 1) {
-          setLooping(false);
-          setLoopsLeft(LOOP_TIMES);
-          return;
-        }
-        setLoopsLeft((n) => n - 1);
-        player.seekMs(start);
+      if (player.currentMs() < end - 60) return;
+      clearInterval(timer);
+      if (loop.left <= 1) {
+        // Let playback carry on into the next line.
+        setLoop(null);
+        setManualIdx(null);
+        return;
       }
+      player.seekMs(start);
+      setLoop({ ...loop, left: loop.left - 1 });
     }, 120);
     return () => clearInterval(timer);
-  }, [looping, start, end, loopsLeft, player]);
+  }, [loop, start, end, player]);
+
+  const toggleLoop = useCallback(() => {
+    if (loop) {
+      setLoop(null);
+      return;
+    }
+    if (start === null) return;
+    setLoop({ idx, left: LOOP_TIMES });
+    player?.seekMs(start);
+  }, [loop, idx, start, player]);
 
   const step = useCallback(
     (delta: number) => {
       const next = Math.max(0, Math.min(lines.length - 1, idx + delta));
       setManualIdx(next);
+      setLoop((l) => (l ? { idx: next, left: LOOP_TIMES } : null));
       const at = lines[next]?.timeMs;
       if (at !== null && at !== undefined) player?.seekMs(at);
     },
@@ -195,17 +210,14 @@ export function Stage({
       else if (isSpace) {
         e.preventDefault();
         player?.toggle();
-      } else if (e.key.toLowerCase() === 'l') {
-        setLooping((v) => !v);
-        setLoopsLeft(LOOP_TIMES);
-        if (start !== null) player?.seekMs(start);
-      } else if (e.key === 'ArrowRight') step(1);
+      } else if (e.key.toLowerCase() === 'l') toggleLoop();
+      else if (e.key === 'ArrowRight') step(1);
       else if (e.key === 'ArrowLeft') step(-1);
       else if (e.key.toLowerCase() === 't') setShowEnglish((v) => !v);
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [onClose, player, step, start]);
+  }, [onClose, player, step, toggleLoop]);
 
   const chunks = useMemo(() => renderable(line), [line]);
   const hoveredChunk = hovered === null ? null : chunks[hovered];
@@ -588,15 +600,11 @@ export function Stage({
           <span className="divider" />
           <button
             className={`stage-btn${looping ? ' on' : ''}`}
-            onClick={() => {
-              setLooping((v) => !v);
-              setLoopsLeft(LOOP_TIMES);
-              if (start !== null) player?.seekMs(start);
-            }}
+            onClick={toggleLoop}
             disabled={start === null}
             title={start === null ? 'This song has no timings yet' : undefined}
           >
-            ↻ Loop ×{looping ? loopsLeft : LOOP_TIMES} <span className="kbd">L</span>
+            ↻ Loop ×{loop?.left ?? LOOP_TIMES} <span className="kbd">L</span>
           </button>
           <button className="stage-btn" onClick={() => setShowEnglish((v) => !v)}>
             {showEnglish ? 'Hide English' : 'Show English'} <span className="kbd">T</span>
